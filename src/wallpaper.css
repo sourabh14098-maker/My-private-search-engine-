@@ -1,4 +1,92 @@
-.newtab-backdrop{background-color:#0c1114;background-size:cover;background-position:center;transition:background .45s ease,transform 18s ease}.wallpaper-0 .newtab-backdrop{background-image:radial-gradient(ellipse at 52% 78%,rgba(148,177,184,.22) 0 5%,transparent 34%),linear-gradient(145deg,transparent 0 43%,rgba(5,10,13,.82) 44% 46%,transparent 47%),linear-gradient(35deg,transparent 0 54%,rgba(27,53,61,.68) 55% 58%,transparent 59%),radial-gradient(ellipse at 50% 10%,rgba(116,151,161,.14),transparent 30%),linear-gradient(180deg,#07141d,#152831 56%,#071014)}.wallpaper-1 .newtab-backdrop{background-image:radial-gradient(circle at 20% 25%,rgba(215,242,109,.15) 0 1px,transparent 2px),radial-gradient(circle at 74% 34%,rgba(154,198,210,.16) 0 1px,transparent 2px),linear-gradient(115deg,transparent 0 47%,rgba(115,158,169,.18) 48% 48.4%,transparent 49%),linear-gradient(25deg,transparent 0 62%,rgba(215,242,109,.1) 63% 63.3%,transparent 64%),linear-gradient(145deg,#0b171a,#17272a 52%,#071012)}.wallpaper-2 .newtab-backdrop{background-image:linear-gradient(90deg,transparent 0 12%,rgba(137,175,177,.13) 12.5% 13%,transparent 13.5% 27%,rgba(137,175,177,.1) 27.5% 29%,transparent 29.5% 100%),linear-gradient(0deg,rgba(215,242,109,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(215,242,109,.05) 1px,transparent 1px),linear-gradient(180deg,#10191c,#0a1114)}.wallpaper-3 .newtab-backdrop{background-image:radial-gradient(ellipse at 30% 35%,rgba(112,178,177,.27),transparent 30%),radial-gradient(ellipse at 74% 72%,rgba(116,141,214,.19),transparent 36%),linear-gradient(135deg,#061316,#152324 48%,#0c1020)}.newtab-home:hover .newtab-backdrop{transform:scale(1.025)}.wallpaper-settings{position:absolute;z-index:5;top:25px;right:0;width:32px;height:32px;display:grid;place-items:center;color:#e7e9e3;border:1px solid rgba(255,255,255,.16);background:rgba(8,11,10,.45);backdrop-filter:blur(10px)}.wallpaper-settings:hover{color:var(--accent);border-color:rgba(215,242,109,.5)}.wallpaper-popover{position:absolute;z-index:7;top:65px;right:0;width:210px;padding:13px;background:rgba(8,11,10,.93);border:1px solid rgba(255,255,255,.2);box-shadow:0 16px 35px rgba(0,0,0,.4);backdrop-filter:blur(16px);font:10px var(--mono)}.wallpaper-popover-head{display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.65);font-size:9px;letter-spacing:.1em;border-bottom:1px solid rgba(255,255,255,.14);padding-bottom:10px;margin-bottom:12px}.wallpaper-popover-head button{display:grid;place-items:center;border:0;background:transparent;color:rgba(255,255,255,.65)}.wallpaper-popover>strong{display:block;color:#fff;font-size:12px;margin-bottom:12px}.wallpaper-popover label{display:grid;gap:5px;color:rgba(255,255,255,.58);margin-top:10px}.wallpaper-popover select{width:100%;color:#e8e8e1;border:1px solid rgba(255,255,255,.15);background:#111715;padding:7px;font:10px var(--mono)}.wallpaper-popover select:disabled{opacity:.45}.wallpaper-actions{display:flex;gap:5px;margin-top:14px}.wallpaper-actions button{flex:1;display:grid;place-items:center;height:28px;color:#e8e8e1;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06)}.wallpaper-actions button:hover{color:var(--accent);border-color:rgba(215,242,109,.5)}
-@media(max-width:720px){.wallpaper-settings{top:16px;right:0}.wallpaper-popover{top:55px;right:0}.newtab-home:hover .newtab-backdrop{transform:none}}
-@media(prefers-reduced-motion:reduce){.newtab-backdrop{transition:none}.newtab-home:hover .newtab-backdrop{transform:none}}
-.wallpaper-control{position:absolute;z-index:7;top:25px;right:0}.wallpaper-control .wallpaper-settings{position:relative;top:auto;right:auto}.wallpaper-control .wallpaper-popover{top:40px;right:0}.wallpaper-popover fieldset{display:grid;gap:7px;margin:12px 0 0;padding:0;border:0}.wallpaper-popover legend{color:rgba(255,255,255,.58);margin-bottom:2px}.wallpaper-popover fieldset label{display:flex;align-items:center;gap:7px;margin:0;color:#e8e8e1}.wallpaper-popover input{accent-color:var(--accent);margin:0}.wallpaper-popover>strong span{color:rgba(255,255,255,.5);font-weight:400}.wallpaper-fade-in{animation:wallpaper-fade-in .22s ease-out}@keyframes wallpaper-fade-in{from{opacity:0}to{opacity:1}}@media(max-width:720px){.wallpaper-control{top:16px;right:0}.wallpaper-control .wallpaper-popover{top:39px}}@media(prefers-reduced-motion:reduce){.wallpaper-fade-in{animation:none}}
+/* Fullscreen Wallpaper Backdrop & Vignette Overlay */
+.newtab-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  filter: saturate(1.08) contrast(1.04) brightness(1.02);
+  transition: opacity 0.35s ease-in-out, transform 20s ease;
+}
+
+.newtab-home:hover .newtab-backdrop {
+  transform: scale(1.015);
+}
+
+.wallpaper-fade-in {
+  animation: wallpaperCrossfade 0.35s ease-out forwards;
+}
+
+@keyframes wallpaperCrossfade {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Subtle Vignette & Readability Shade */
+.newtab-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 38%, transparent 25%, rgba(4, 7, 10, 0.45) 85%),
+    linear-gradient(180deg, rgba(3, 6, 9, 0.35) 0%, rgba(3, 6, 9, 0.05) 35%, rgba(3, 6, 9, 0.6) 100%);
+}
+
+/* Wallpaper Customize Trigger Button */
+.wallpaper-control {
+  position: absolute;
+  z-index: 25;
+  top: 14px;
+  right: clamp(16px, 3.5vw, 48px);
+}
+
+.wallpaper-settings {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(10, 15, 18, 0.48);
+  backdrop-filter: blur(12px);
+  color: rgba(255, 255, 255, 0.85);
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.wallpaper-settings:hover {
+  background: rgba(215, 242, 109, 0.18);
+  border-color: rgba(215, 242, 109, 0.5);
+  color: #d7f26d;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 720px) {
+  .wallpaper-control {
+    top: 12px;
+    right: 56px;
+  }
+  .wallpaper-settings {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .newtab-backdrop,
+  .newtab-home:hover .newtab-backdrop {
+    transition: none !important;
+    transform: none !important;
+    animation: none !important;
+  }
+}
