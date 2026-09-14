@@ -1,0 +1,3 @@
+import { ChevronDown, Filter } from 'lucide-react'
+
+export function SearchFilters() { return <div className="search-filters"><span><Filter size={14} /> Filters</span><label>Safe Search <select defaultValue="On"><option>On</option><option>Off</option></select></label><label>Time <select defaultValue="Any time"><option>Any time</option><option>Past day</option><option>Past week</option></select></label><label>Region <select defaultValue="Global"><option>Global</option><option>United States</option></select></label><label>Language <select defaultValue="English"><option>English</option><option>Spanish</option></select></label><ChevronDown className="filter-chevron" size={14} /></div> }
