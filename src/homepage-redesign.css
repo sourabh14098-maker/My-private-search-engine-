@@ -1,9 +1,12 @@
-/* Edge-to-Edge Minimal Shell Integration for New Tab Homepage */
+/* ==================================================
+   DitchX Browser New Tab - Design System & Redesign
+   ================================================== */
 
 .home-shell {
   position: relative;
   min-height: 100svh;
   background: transparent;
+  overflow-x: hidden;
 }
 
 .home-shell > main {
@@ -11,105 +14,786 @@
   min-height: 100svh;
 }
 
-/* Minimal Header Floating Seamlessly Over Wallpaper */
-.home-shell > .site-header {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 15;
-  width: auto;
-  height: 64px;
-  padding: 0 clamp(16px, 3.5vw, 48px);
-  margin: 0;
-  border-bottom: 0;
-  background: transparent;
-  pointer-events: none;
+/* Base New Tab Environment */
+.newtab-home {
+  --accent: #38bdf8;
+  --accent-hover: #7dd3fc;
+  --accent-glow: rgba(56, 189, 248, 0.25);
+  --panel-bg: rgba(10, 16, 26, 0.46);
+  --panel-border: rgba(255, 255, 255, 0.1);
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  color: #f8fafc;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+  user-select: none;
 }
 
-.home-shell > .site-header .logo,
-.home-shell > .site-header .nav-links,
-.home-shell > .site-header .mobile-menu {
+.newtab-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+  width: 100%;
+}
+
+/* --------------------------------------------------
+   2. MINIMAL TOP AREA (Browser Chrome Controls)
+   -------------------------------------------------- */
+.newtab-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px clamp(16px, 3.5vw, 40px);
+  width: 100%;
   pointer-events: auto;
+  z-index: 20;
 }
 
-.home-shell > .site-header .logo {
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(9, 13, 17, 0.45);
+.topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  color: #ffffff;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(12, 18, 28, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s ease;
+}
+
+.topbar-brand:hover {
+  background: rgba(18, 26, 38, 0.55);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.topbar-brand-name {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+  padding-right: 4px;
+}
+
+.topbar-brand-name .brand-x {
+  color: #38bdf8;
+  font-weight: 900;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-action-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 18, 28, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(10px);
-  font-size: 11px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
-.home-shell > .site-header .nav-links {
-  gap: 22px;
+.topbar-action-btn:hover,
+.topbar-action-btn.active {
+  background: rgba(30, 41, 59, 0.7);
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3), 0 0 10px rgba(56, 189, 248, 0.2);
+}
+
+.customize-trigger-wrap {
+  position: relative;
+}
+
+/* --------------------------------------------------
+   3. LARGE CENTER BRANDING
+   -------------------------------------------------- */
+.newtab-center {
+  width: min(720px, calc(100% - 32px));
+  margin: clamp(20px, 6vh, 60px) auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  z-index: 10;
+}
+
+.ditchx-brand-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 22px;
+  user-select: none;
+}
+
+.ditchx-symbol-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 10px;
+  filter: drop-shadow(0 10px 24px rgba(56, 189, 248, 0.25));
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ditchx-symbol-wrap:hover {
+  transform: scale(1.05);
+}
+
+.ditchx-title-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ditchx-wordmark {
+  font-size: clamp(42px, 6.2vw, 62px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  color: #ffffff;
+  margin: 0;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.75);
+}
+
+.ditchx-x-accent {
+  background: linear-gradient(135deg, #ffffff 0%, #38bdf8 55%, #2563eb 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 900;
+  margin-left: 1px;
+}
+
+.ditchx-tagline {
+  font-size: clamp(13px, 1.6vw, 15px);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.78);
+  margin: 8px 0 0;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+
+.ditchx-search-engine-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(10, 16, 26, 0.46);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.65);
+  letter-spacing: 0.03em;
+}
+
+.ditchx-search-engine-pill .pill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 6px #38bdf8;
+}
+
+.ditchx-search-engine-pill .pill-punct {
+  color: #38bdf8;
+}
+
+/* --------------------------------------------------
+   4. PRIMARY SEARCH FIELD
+   -------------------------------------------------- */
+.newtab-search {
+  width: 100%;
+}
+
+.newtab-search .search-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.newtab-search .search-form.large {
+  height: 64px;
+  padding: 0 10px 0 20px;
+  border-radius: 18px;
+  background: rgba(10, 16, 26, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow:
+    0 18px 44px -10px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.newtab-search .search-form.large:hover {
+  background: rgba(13, 21, 33, 0.74);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.newtab-search .search-form.large:focus-within {
+  background: rgba(8, 13, 21, 0.9);
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow:
+    0 0 0 3px rgba(56, 189, 248, 0.18),
+    0 22px 48px -6px rgba(0, 0, 0, 0.65);
+}
+
+.newtab-search .search-form.large input {
+  font-size: 16px;
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.newtab-search .search-form.large input::placeholder {
+  color: rgba(255, 255, 255, 0.48);
+  font-weight: 400;
+}
+
+.newtab-search .search-icon {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.newtab-search .submit-search {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+  color: #ffffff;
+  border: 0;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.newtab-search .submit-search:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+  box-shadow: 0 6px 18px rgba(56, 189, 248, 0.45);
+}
+
+/* --------------------------------------------------
+   5. SEARCH MODES (Compact Segmented Controls)
+   -------------------------------------------------- */
+.newtab-search .mode-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+  margin-top: 13px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(10, 16, 24, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.newtab-search .mode-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.newtab-search .mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
   color: rgba(255, 255, 255, 0.72);
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
   font-size: 11px;
   font-weight: 500;
-  padding-right: 52px; /* space before customize button */
+  white-space: nowrap;
+  transition: all 0.18s ease;
+  cursor: pointer;
 }
 
-.home-shell > .site-header .nav-links a {
+.newtab-search .mode-tab:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.newtab-search .mode-tab.active {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.newtab-search .mode-tab.active svg {
+  color: #38bdf8;
+}
+
+/* Privacy Trust Signal */
+.newtab-trust {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 13px;
+  color: rgba(255, 255, 255, 0.68);
+  font: 500 10px var(--mono, 'DM Mono', monospace);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
+}
+
+.newtab-trust span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.newtab-trust svg {
+  color: #38bdf8;
+}
+
+/* --------------------------------------------------
+   6. SHORTCUTS (Compact Browser Icons)
+   -------------------------------------------------- */
+.shortcut-dock {
+  margin-top: 30px;
+  width: 100%;
+}
+
+.shortcut-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+}
+
+.shortcut-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  width: 66px;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.18s ease;
+}
+
+.shortcut-icon-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 18, 28, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shortcut-tile:hover .shortcut-icon-badge {
+  transform: translateY(-2px);
+  background: rgba(25, 36, 52, 0.7);
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #ffffff;
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.35),
+    0 0 14px rgba(56, 189, 248, 0.2);
+}
+
+.shortcut-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.78);
+  max-width: 66px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
   transition: color 0.18s;
 }
 
-.home-shell > .site-header .nav-links a:hover,
-.home-shell > .site-header .nav-links a.active {
+.shortcut-tile:hover .shortcut-label {
   color: #ffffff;
 }
 
-/* Minimal Footer Floating Seamlessly Over Wallpaper */
-.home-shell > .site-footer {
-  position: absolute;
+/* --------------------------------------------------
+   7. LOWER INFORMATION MODULES
+   -------------------------------------------------- */
+.newtab-bottom {
+  width: min(1080px, calc(100% - 48px));
+  margin: auto auto 24px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding-top: 36px;
   z-index: 10;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: auto;
-  margin: 0;
-  padding: 14px clamp(16px, 3.5vw, 48px);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, transparent, rgba(4, 7, 9, 0.45));
+}
+
+.newtab-panel {
+  padding: 15px 17px;
+  border-radius: 14px;
+  background: rgba(9, 14, 22, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.24);
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.newtab-panel:hover {
+  background: rgba(13, 20, 30, 0.6);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.panel-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.65);
+  font: 600 9px var(--mono, 'DM Mono', monospace);
+  letter-spacing: 0.12em;
+}
+
+.panel-label svg {
+  color: #38bdf8;
+}
+
+/* Module 1: Stats */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.stats-row div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stats-row strong {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+
+.stats-row span {
+  font: 9px var(--mono, 'DM Mono', monospace);
   color: rgba(255, 255, 255, 0.58);
-  font-size: 10px;
-  pointer-events: none;
 }
 
-.home-shell > .site-footer a,
-.home-shell > .site-footer span {
-  pointer-events: auto;
+.stats-panel > p {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 11px;
+  font: 9px var(--mono, 'DM Mono', monospace);
+  color: rgba(255, 255, 255, 0.55);
 }
 
-.home-shell > .site-footer a:hover {
+.stats-panel > p svg {
+  color: #38bdf8;
+}
+
+/* Module 2: Trending */
+.panel-feature {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 11px;
+  padding: 0 0 9px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s;
+}
+
+.panel-feature:hover {
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.feature-category {
+  display: block;
+  font: 8px var(--mono, 'DM Mono', monospace);
+  color: #38bdf8;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.feature-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.panel-feature svg {
+  color: #38bdf8;
+  transition: transform 0.2s ease;
+}
+
+.panel-feature:hover svg {
+  transform: translate(2px, -2px);
+}
+
+.panel-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.panel-links button {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  padding: 0;
+  font: 9px var(--mono, 'DM Mono', monospace);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  transition: color 0.18s;
+}
+
+.panel-links button:hover {
   color: #ffffff;
 }
 
-/* Mobile Header & Shell */
+.panel-links button svg {
+  color: #38bdf8;
+}
+
+/* Module 3: Discover */
+.build-panel h2 {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 10px 0 5px;
+  color: #ffffff;
+}
+
+.build-panel h2 em {
+  color: rgba(255, 255, 255, 0.6);
+  font-style: normal;
+}
+
+.build-panel p {
+  font-size: 10px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 8px;
+}
+
+.discover-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #38bdf8;
+  font: 500 9px var(--mono, 'DM Mono', monospace);
+  letter-spacing: 0.04em;
+  transition: gap 0.2s;
+}
+
+.discover-link:hover {
+  gap: 6px;
+}
+
+/* --------------------------------------------------
+   8. MINIMAL QUIET FOOTER
+   -------------------------------------------------- */
+.newtab-footer {
+  width: min(1080px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 14px 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 11px;
+  z-index: 10;
+}
+
+.newtab-footer .footer-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.newtab-footer .footer-brand {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.newtab-footer .footer-sep {
+  opacity: 0.4;
+}
+
+.newtab-footer .footer-tagline {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.newtab-footer .footer-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.newtab-footer .footer-links a {
+  color: rgba(255, 255, 255, 0.48);
+  transition: color 0.18s;
+}
+
+.newtab-footer .footer-links a:hover {
+  color: #ffffff;
+}
+
+/* --------------------------------------------------
+   RESPONSIVE DESIGN
+   -------------------------------------------------- */
+@media (max-width: 960px) {
+  .newtab-bottom {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding-top: 28px;
+  }
+}
+
 @media (max-width: 720px) {
-  .home-shell > .site-header {
+  .newtab-topbar {
+    padding: 12px 16px;
+  }
+
+  .topbar-brand-name {
+    font-size: 14px;
+  }
+
+  .newtab-center {
+    margin-top: clamp(16px, 5vh, 48px);
+    width: calc(100% - 24px);
+  }
+
+  .ditchx-wordmark {
+    font-size: 38px;
+  }
+
+  .ditchx-tagline {
+    font-size: 12px;
+  }
+
+  .newtab-search .search-form.large {
     height: 56px;
-    padding: 0 14px;
+    padding-left: 16px;
+    border-radius: 14px;
   }
 
-  .home-shell > .site-header .nav-links {
-    top: 56px;
-    left: 14px;
-    right: 14px;
-    padding: 12px;
-    background: rgba(8, 12, 16, 0.96);
-    backdrop-filter: blur(20px);
+  .newtab-search .search-form.large input {
+    font-size: 14px;
+  }
+
+  .newtab-search .mode-tabs {
+    justify-content: flex-start;
+    overflow-x: auto;
+    width: 100%;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 3px 6px;
   }
 
-  .home-shell > .site-footer {
-    padding: 10px 14px;
-    font-size: 8px;
+  .newtab-search .mode-tab {
+    padding: 5px 9px;
+    font-size: 10px;
   }
 
-  .home-shell > .site-footer > span:nth-child(2) {
+  .shortcut-dock {
+    margin-top: 22px;
+  }
+
+  .shortcut-grid {
+    gap: 10px;
+  }
+
+  .shortcut-tile {
+    width: 58px;
+  }
+
+  .shortcut-icon-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .shortcut-label {
+    font-size: 10px;
+    max-width: 58px;
+  }
+
+  .newtab-bottom {
+    width: calc(100% - 24px);
+    margin-bottom: 16px;
+  }
+
+  .newtab-footer {
+    width: calc(100% - 24px);
+    flex-direction: column;
+    gap: 8px;
+    text-align: center;
+    padding-bottom: 16px;
+  }
+
+  .footer-tagline {
     display: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .shortcut-grid {
+    gap: 8px;
+  }
+  .shortcut-tile {
+    width: 50px;
+  }
+  .shortcut-icon-badge {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shortcut-tile,
+  .shortcut-icon-badge,
+  .newtab-search .submit-search,
+  .panel-feature svg,
+  .ditchx-symbol-wrap {
+    transition: none !important;
+    transform: none !important;
   }
 }

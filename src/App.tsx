@@ -29,7 +29,7 @@ const modePaths: Record<SearchMode, string> = { all: '/search', images: '/images
 const settingsKey = 'ditchgoogle-settings'
 const defaultUserPreferences: UserPreferences = { safeSearch: true, language: 'English', region: 'Global', theme: 'dark', animations: true, compactResults: false }
 const searchTo = (navigate: ReturnType<typeof useNavigate>, query: string) => navigate(`/search?q=${encodeURIComponent(query)}`)
-function Shell({ children }: { children: React.ReactNode }) { const location = useLocation(); const isHome = location.pathname === '/'; return <div className={isHome ? 'app-shell home-shell' : 'app-shell'}><Navbar /><main>{children}</main><Footer /></div> }
+function Shell({ children }: { children: React.ReactNode }) { const location = useLocation(); const isHome = location.pathname === '/'; return <div className={isHome ? 'app-shell home-shell' : 'app-shell'}>{!isHome && <Navbar />}<main>{children}</main>{!isHome && <Footer />}</div> }
 function navigateMode(navigate: ReturnType<typeof useNavigate>, mode: SearchMode, query: string) { navigate(`${modePaths[mode]}${query ? `?q=${encodeURIComponent(query)}` : ''}`) }
 
 function SearchHeader({ query, mode, navigate }: { query: string; mode: SearchMode; navigate: ReturnType<typeof useNavigate> }) { return <div className="results-header"><div className="container"><div className="results-search"><SearchBar key={query} initialQuery={query} onSubmit={(next) => searchTo(navigate, next)} /><span className="results-private"><ShieldCheck size={14} /> Private</span></div><SearchModeTabs mode={mode} onModeChange={(next) => navigateMode(navigate, next, query)} /></div></div> }

@@ -4,12 +4,13 @@ import {
   Check,
   Compass,
   LockKeyhole,
+  Settings2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Logo } from '../components/common/Logo'
+import { DitchXLogoLockup, DitchXSymbol } from '../components/common/DitchXBrand'
 import {
   CustomizePanel,
   type CustomizeMode,
@@ -148,10 +149,10 @@ function readWallpaperState(): WallpaperState {
 }
 
 const trendingTopics = [
-  { topic: 'Latest AI developments', category: 'Technology', badge: 'Active' },
-  { topic: 'Java development', category: 'Programming' },
+  { topic: 'Latest AI developments', category: 'Technology' },
   { topic: 'Cybersecurity research', category: 'Security' },
-  { topic: 'Web development', category: 'Engineering' },
+  { topic: 'Privacy web standards', category: 'Standards' },
+  { topic: 'Open web architecture', category: 'Engineering' },
 ]
 
 export function HomePage() {
@@ -169,7 +170,7 @@ export function HomePage() {
   const [rotation, setRotation] = useState<WallpaperRotation>(initialWallpaper.rotation)
   const [changedAt, setChangedAt] = useState(initialWallpaper.changedAt)
   const [customizeOpen, setCustomizeOpen] = useState(false)
-  const wallpaperControlRef = useRef<HTMLDivElement>(null)
+  const customizeRef = useRef<HTMLDivElement>(null)
 
   const currentWallpaper: Wallpaper = wallpapers[wallpaperIndex] || wallpapers[0]
 
@@ -198,7 +199,7 @@ export function HomePage() {
     }
 
     const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!wallpaperControlRef.current?.contains(event.target as Node)) {
+      if (!customizeRef.current?.contains(event.target as Node)) {
         setCustomizeOpen(false)
       }
     }
@@ -248,7 +249,7 @@ export function HomePage() {
 
   return (
     <div className={`newtab-home theme-${preferences.theme}`}>
-      {/* Fullscreen Wallpaper Backdrop */}
+      {/* 1. Fullscreen Wallpaper Backdrop */}
       <div
         key={currentWallpaper.id}
         className="newtab-backdrop wallpaper-fade-in"
@@ -262,82 +263,95 @@ export function HomePage() {
       />
       <div className="newtab-shade" />
 
-      {/* Top-Right Floating Customize Button */}
-      <div className="wallpaper-control" ref={wallpaperControlRef}>
-        <button
-          className="wallpaper-settings"
-          onClick={() => setCustomizeOpen(!customizeOpen)}
-          aria-label="Customize New Tab"
-          aria-expanded={customizeOpen}
-          title="Customize New Tab"
-        >
-          <SlidersHorizontal size={15} />
-        </button>
-
-        {customizeOpen && (
-          <CustomizePanel
-            wallpapers={wallpapers}
-            wallpaperIndex={wallpaperIndex}
-            wallpaperMode={wallpaperMode as CustomizeMode}
-            rotation={rotation as CustomizeRotation}
-            shortcuts={shortcuts}
-            showShortcuts={preferences.showShortcuts}
-            showPrivacyStats={preferences.showPrivacyStats}
-            showTrending={preferences.showTrending}
-            showDiscovery={preferences.showDiscovery}
-            autocompleteEnabled={preferences.autocompleteEnabled}
-            voiceEnabled={preferences.voiceEnabled}
-            defaultSearchMode={preferences.defaultSearchMode}
-            theme={preferences.theme}
-            onClose={() => setCustomizeOpen(false)}
-            onWallpaperChange={moveWallpaper}
-            onWallpaperModeChange={setWallpaperMode}
-            onRotationChange={setRotation}
-            onAddShortcut={(shortcut) =>
-              setShortcuts((current) => [...current, shortcut])
-            }
-            onUpdateShortcut={(shortcut) =>
-              setShortcuts((current) =>
-                current.map((item) => (item.id === shortcut.id ? shortcut : item))
-              )
-            }
-            onRemoveShortcut={(id) =>
-              setShortcuts((current) => current.filter((item) => item.id !== id))
-            }
-            onToggle={(key, value) => updatePreference(key, value)}
-            onDefaultSearchModeChange={(next) =>
-              updatePreference('defaultSearchMode', next as SearchMode)
-            }
-            onThemeChange={(next) => updatePreference('theme', next)}
-          />
-        )}
-      </div>
-
+      {/* Main Viewport Container */}
       <div className="newtab-content">
+        {/* 2. Minimal Top Area */}
+        <header className="newtab-topbar" aria-label="Browser controls">
+          <Link to="/" className="topbar-brand" aria-label="DitchX Home">
+            <DitchXSymbol size={24} />
+            <span className="topbar-brand-name">
+              Ditch<span className="brand-x">X</span>
+            </span>
+          </Link>
 
-        {/* Central Experience: Branding + Hero Search + Shortcuts */}
-        <main className="newtab-center" aria-label="Search hero">
-          {/* Compact Branding */}
-          <div className="newtab-brand">
-            <div className="brand-badge">
-              <Logo compact />
-              <span className="brand-name">
-                DITCH GOOGLE<span className="brand-punct">!R!</span>
-              </span>
+          <div className="topbar-actions">
+            <Link
+              to="/settings"
+              className="topbar-action-btn"
+              aria-label="Browser settings"
+              title="Settings"
+            >
+              <Settings2 size={16} />
+            </Link>
+
+            <div className="customize-trigger-wrap" ref={customizeRef}>
+              <button
+                className={`topbar-action-btn ${customizeOpen ? 'active' : ''}`}
+                onClick={() => setCustomizeOpen(!customizeOpen)}
+                aria-label="Customize New Tab"
+                aria-expanded={customizeOpen}
+                title="Customize New Tab"
+              >
+                <SlidersHorizontal size={16} />
+              </button>
+
+              {customizeOpen && (
+                <CustomizePanel
+                  wallpapers={wallpapers}
+                  wallpaperIndex={wallpaperIndex}
+                  wallpaperMode={wallpaperMode as CustomizeMode}
+                  rotation={rotation as CustomizeRotation}
+                  shortcuts={shortcuts}
+                  showShortcuts={preferences.showShortcuts}
+                  showPrivacyStats={preferences.showPrivacyStats}
+                  showTrending={preferences.showTrending}
+                  showDiscovery={preferences.showDiscovery}
+                  autocompleteEnabled={preferences.autocompleteEnabled}
+                  voiceEnabled={preferences.voiceEnabled}
+                  defaultSearchMode={preferences.defaultSearchMode}
+                  theme={preferences.theme}
+                  onClose={() => setCustomizeOpen(false)}
+                  onWallpaperChange={moveWallpaper}
+                  onWallpaperModeChange={setWallpaperMode}
+                  onRotationChange={setRotation}
+                  onAddShortcut={(shortcut) =>
+                    setShortcuts((current) => [...current, shortcut])
+                  }
+                  onUpdateShortcut={(shortcut) =>
+                    setShortcuts((current) =>
+                      current.map((item) => (item.id === shortcut.id ? shortcut : item))
+                    )
+                  }
+                  onRemoveShortcut={(id) =>
+                    setShortcuts((current) => current.filter((item) => item.id !== id))
+                  }
+                  onToggle={(key, value) => updatePreference(key, value)}
+                  onDefaultSearchModeChange={(next) =>
+                    updatePreference('defaultSearchMode', next as SearchMode)
+                  }
+                  onThemeChange={(next) => updatePreference('theme', next)}
+                />
+              )}
             </div>
-            <span className="brand-overline">PRIVATE SEARCH ENGINE</span>
           </div>
+        </header>
 
-          {/* Primary Hero Search Bar */}
+        {/* 3. Central Experience: Branding + Primary Search + Shortcuts */}
+        <main className="newtab-center" aria-label="Search hero">
+          {/* Large Center Branding */}
+          <DitchXLogoLockup size={56} showTagline={true} />
+
+          {/* 4. Primary Search */}
           <div className="newtab-search">
             <SearchBar
               large
+              placeholder="Search the web..."
               onSubmit={search}
               autocompleteEnabled={preferences.autocompleteEnabled}
               voiceEnabled={preferences.voiceEnabled}
             />
 
-            {/* Horizontal Search Modes */}
+            {/* 5. Compact Search Modes */}
             <SearchModeTabs mode={mode} onModeChange={changeMode} />
 
             {/* Subtle, Honest Privacy Signal */}
@@ -346,15 +360,15 @@ export function HomePage() {
                 <Check size={11} /> Private by default
               </span>
               <span>
-                <Check size={11} /> No search profile
+                <Check size={11} /> Zero search tracking
               </span>
               <span>
-                <Check size={11} /> No personalized ads
+                <Check size={11} /> No ad profiling
               </span>
             </div>
           </div>
 
-          {/* Browser-Style Icon Shortcuts */}
+          {/* 6. Browser-Style Icon Shortcuts */}
           {preferences.showShortcuts && (
             <div className="shortcut-dock" aria-label="Saved shortcuts">
               <div className="shortcut-grid">
@@ -378,9 +392,7 @@ export function HomePage() {
           )}
         </main>
 
-        {/* Natural Negative Space Above Lower Information Modules */}
-
-        {/* Lightweight Floating Bottom Modules */}
+        {/* 7. Lightweight Floating Lower Information Modules */}
         {hasBottomModules && (
           <div className="newtab-bottom" aria-label="New tab information overlay">
             {/* Module 1: Privacy Status */}
@@ -391,20 +403,20 @@ export function HomePage() {
                 </div>
                 <div className="stats-row">
                   <div>
-                    <strong>ON</strong>
+                    <strong>ACTIVE</strong>
                     <span>Private default</span>
                   </div>
                   <div>
-                    <strong>NONE</strong>
-                    <span>Search profile</span>
+                    <strong>0</strong>
+                    <span>Search profiles</span>
                   </div>
                   <div>
-                    <strong>OFF</strong>
-                    <span>Tracking ads</span>
+                    <strong>BLOCKED</strong>
+                    <span>Trackers & ads</span>
                   </div>
                 </div>
                 <p>
-                  <LockKeyhole size={11} /> Your search activity stays in this browser.
+                  <LockKeyhole size={11} /> Search queries and history stay on this device.
                 </p>
               </section>
             )}
@@ -413,7 +425,7 @@ export function HomePage() {
             {preferences.showTrending && (
               <section className="newtab-panel explore-panel" aria-label="Trending searches">
                 <div className="panel-label">
-                  <Compass size={12} /> TRENDING
+                  <Compass size={12} /> TRENDING SEARCHES
                 </div>
                 <button
                   className="panel-feature"
@@ -460,6 +472,20 @@ export function HomePage() {
             )}
           </div>
         )}
+
+        {/* 8. Minimal Quiet Browser Footer */}
+        <footer className="newtab-footer" aria-label="Browser footer">
+          <div className="footer-left">
+            <span className="footer-brand">DitchX</span>
+            <span className="footer-sep">·</span>
+            <span className="footer-tagline">Browse Beyond the Default</span>
+          </div>
+          <nav className="footer-links" aria-label="Quick links">
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/settings">Settings</Link>
+            <Link to="/about">About</Link>
+          </nav>
+        </footer>
       </div>
     </div>
   )
