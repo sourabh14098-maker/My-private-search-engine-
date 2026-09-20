@@ -200,5 +200,70 @@ describe('Backend Foundation API Tests', () => {
       )
     })
   })
+
+  describe('BraveSearchProvider adapter & normalizer', () => {
+    it('should normalize raw Brave web and discussion results cleanly into typed contracts', async () => {
+      const {
+        normalizeBraveWebResults,
+        normalizeBraveDiscussions,
+      } = await import('../src/services/providers/brave.provider.js')
+
+      const rawWeb = [
+        {
+          title: 'Wikipedia, the free encyclopedia',
+          url: 'https://en.wikipedia.org/wiki/Main_Page',
+          description: 'A free online encyclopedia created and edited by volunteers.',
+          page_age: '2024-05-01',
+          profile: {
+            name: 'Wikipedia',
+            long_name: 'en.wikipedia.org',
+          },
+          extra_snippets: ['History', 'Community portal'],
+        },
+      ]
+
+      const normalizedWeb = normalizeBraveWebResults(rawWeb)
+      assert.equal(normalizedWeb.length, 1)
+      assert.equal(normalizedWeb[0].title, 'Wikipedia, the free encyclopedia')
+      assert.equal(normalizedWeb[0].domain, 'en.wikipedia.org')
+      assert.equal(normalizedWeb[0].metadata, 'Wikipedia')
+      assert.equal(normalizedWeb[0].isDemo, false)
+      assert.deepEqual(normalizedWeb[0].sitelinks, ['History', 'Community portal'])
+
+      const rawDiscussions = [
+        {
+          title: 'How to build privacy-first search engines?',
+          url: 'https://reddit.com/r/privacy/comments/12345',
+          forum_name: 'Reddit',
+          num_answers: 42,
+          pubdate: '2024-06-15',
+        },
+      ]
+
+      const normalizedDisc = normalizeBraveDiscussions(rawDiscussions)
+      assert.equal(normalizedDisc.length, 1)
+      assert.equal(normalizedDisc[0].title, 'How to build privacy-first search engines?')
+      assert.equal(normalizedDisc[0].community, 'Reddit')
+      assert.equal(normalizedDisc[0].comments, 42)
+      assert.equal(normalizedDisc[0].isDemo, false)
+    })
+
+    it('should throw 503 PROVIDER_NOT_CONFIGURED when API key is missing', async () => {
+      const { BraveSearchProvider } = await import('../src/services/providers/brave.provider.js')
+      const unconfiguredProvider = new BraveSearchProvider('', 'https://api.search.brave.com/res/v1/web/search', 5000)
+
+      await assert.rejects(
+        async () => {
+          await unconfiguredProvider.search('privacy')
+        },
+        (err: any) => {
+          assert.equal(err.statusCode, 503)
+          assert.equal(err.code, 'PROVIDER_NOT_CONFIGURED')
+          assert.ok(err.message.includes('not configured'))
+          return true
+        }
+      )
+    })
+  })
 })
 

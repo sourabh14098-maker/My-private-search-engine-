@@ -13,6 +13,8 @@ export function getHealth(_req: Request, res: Response): void {
     version: '0.2.0',
     environment: config.nodeEnv,
     demoMode: config.demoMode,
+    searchProvider: config.searchProvider,
+    providerConfigured: config.searchProvider === 'mock' || Boolean(config.braveApiKey),
     supportedVerticals: [
       'all',
       'images',

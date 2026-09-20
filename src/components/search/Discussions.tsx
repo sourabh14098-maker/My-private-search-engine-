@@ -20,7 +20,9 @@ export function Discussions({ items }: DiscussionsProps) {
       <div className="discussions-header">
         <span className="discussions-icon" aria-hidden="true">💬</span>
         <h2 className="discussions-title">Discussions</h2>
-        <span className="demo-pill-tag">Sample threads · Mock index</span>
+        {items.some((item) => item.isDemo) && (
+          <span className="demo-pill-tag">Sample threads · Mock index</span>
+        )}
       </div>
 
       <div className="discussions-list" role="list">

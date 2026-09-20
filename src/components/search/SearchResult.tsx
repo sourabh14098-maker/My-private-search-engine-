@@ -47,7 +47,7 @@ export function SearchResult({ result, onSitelinkClick }: SearchResultProps) {
         <div className="source-info">
           <div className="source-name-row">
             <span className="source-name">{result.metadata || result.domain}</span>
-            <span className="demo-micro-tag">Sample result</span>
+            {result.isDemo && <span className="demo-micro-tag">Sample result</span>}
           </div>
           <span className="result-breadcrumb" title={destinationUrl}>
             {displayBreadcrumb}

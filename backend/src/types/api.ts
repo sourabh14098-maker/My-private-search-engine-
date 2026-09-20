@@ -149,6 +149,8 @@ export interface HealthApiResponse {
   uptimeSeconds: number
   environment: string
   demoMode: boolean
+  searchProvider?: string
+  providerConfigured?: boolean
   supportedVerticals: SearchVertical[]
 }
 

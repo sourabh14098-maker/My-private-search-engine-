@@ -1,42 +1,36 @@
 import { config } from '../config.js'
 import { MockSearchProvider } from './mockProvider.js'
+import { BraveSearchProvider } from './providers/brave.provider.js'
 import type { SearchVertical, SearchApiResponse } from '../types/api.js'
-import { AppError } from '../middleware/errorHandler.js'
 
 export interface SearchProvider {
-  search(query: string, vertical: SearchVertical): Promise<SearchApiResponse> | SearchApiResponse
+  search(query: string, vertical?: SearchVertical): Promise<SearchApiResponse> | SearchApiResponse
 }
 
 export class SearchService {
-  private provider: SearchProvider
+  private braveProvider: SearchProvider
+  private mockProvider: typeof MockSearchProvider
+  private isCustomProvider: boolean
 
-  constructor(provider?: SearchProvider) {
-    if (provider) {
-      this.provider = provider
-    } else if (config.demoMode) {
-      this.provider = MockSearchProvider
-    } else {
-      this.provider = {
-        search: () => {
-          throw new AppError(
-            'Live search index is not yet operational. Independent crawler and indexing pipeline are in development. Set DEMO_MODE=true to view prototype responses.',
-            501,
-            'NOT_IMPLEMENTED'
-          )
-        },
-      }
-    }
+  constructor(customProvider?: SearchProvider) {
+    this.isCustomProvider = Boolean(customProvider)
+    this.braveProvider = customProvider || new BraveSearchProvider()
+    this.mockProvider = MockSearchProvider
   }
 
   async search(query: string, vertical: SearchVertical): Promise<SearchApiResponse> {
-    if (!config.demoMode) {
-      throw new AppError(
-        'Live search index is not yet operational. Independent crawler and indexing pipeline are in development. Set DEMO_MODE=true to view prototype responses.',
-        501,
-        'NOT_IMPLEMENTED'
-      )
+    // If a custom provider was injected (e.g. in unit tests)
+    if (this.isCustomProvider) {
+      return this.braveProvider.search(query, vertical)
     }
-    return this.provider.search(query, vertical)
+
+    // Route 'all' (Web) vertical to Brave Search if configured
+    if (vertical === 'all' && config.searchProvider === 'brave') {
+      return this.braveProvider.search(query, vertical)
+    }
+
+    // All other verticals (and 'all' when searchProvider === 'mock') use MockSearchProvider
+    return this.mockProvider.search(query, vertical)
   }
 }
 
