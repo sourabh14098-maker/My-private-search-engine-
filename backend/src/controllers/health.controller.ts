@@ -5,8 +5,17 @@ import type { HealthApiResponse } from '../types/api.js'
 const startTime = Date.now()
 
 export function getHealth(_req: Request, res: Response): void {
+  const isConfigured =
+    config.searchProvider === 'mock'
+      ? true
+      : config.searchProvider === 'brave'
+      ? Boolean(config.braveApiKey)
+      : config.searchProvider === 'searxng'
+      ? Boolean(config.searxngUrl)
+      : false
+
   const response: HealthApiResponse = {
-    status: 'healthy',
+    status: isConfigured ? 'healthy' : 'degraded',
     service: 'Ditch Google!R! Search Backend',
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
@@ -14,7 +23,7 @@ export function getHealth(_req: Request, res: Response): void {
     environment: config.nodeEnv,
     demoMode: config.demoMode,
     searchProvider: config.searchProvider,
-    providerConfigured: config.searchProvider === 'mock' || Boolean(config.braveApiKey),
+    providerConfigured: isConfigured,
     supportedVerticals: [
       'all',
       'images',

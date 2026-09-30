@@ -2,7 +2,7 @@ import dotenv from 'dotenv'
 
 dotenv.config()
 
-export type SearchProviderType = 'mock' | 'brave'
+export type SearchProviderType = 'mock' | 'brave' | 'searxng'
 
 export interface AppConfig {
   port: number
@@ -12,12 +12,13 @@ export interface AppConfig {
   searchProvider: SearchProviderType
   braveApiKey: string
   braveApiUrl: string
+  searxngUrl: string
   searchTimeoutMs: number
 }
 
 const rawProvider = (process.env.SEARCH_PROVIDER || '').toLowerCase().trim()
 const searchProvider: SearchProviderType =
-  rawProvider === 'brave' || rawProvider === 'mock'
+  rawProvider === 'brave' || rawProvider === 'mock' || rawProvider === 'searxng'
     ? rawProvider
     : process.env.DEMO_MODE === 'false'
     ? 'brave'
@@ -31,5 +32,7 @@ export const config: AppConfig = {
   searchProvider,
   braveApiKey: (process.env.BRAVE_SEARCH_API_KEY || '').trim(),
   braveApiUrl: process.env.BRAVE_SEARCH_API_URL || 'https://api.search.brave.com/res/v1/web/search',
+  searxngUrl: (process.env.SEARXNG_URL || '').trim(),
   searchTimeoutMs: parseInt(process.env.SEARCH_TIMEOUT_MS || '5000', 10),
 }
+

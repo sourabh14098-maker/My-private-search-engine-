@@ -265,5 +265,271 @@ describe('Backend Foundation API Tests', () => {
       )
     })
   })
+
+  describe('SearxngSearchProvider adapter, error handling & normalizer', () => {
+    it('should normalize raw SearXNG web results cleanly into typed contracts', async () => {
+      const { normalizeSearxngWebResults } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+
+      const rawItems = [
+        {
+          title: 'SearXNG - A privacy-respecting metasearch engine',
+          url: 'https://docs.searxng.org/index.html',
+          content: 'SearXNG is a free internet metasearch engine which aggregates results from various search services.',
+          engines: ['duckduckgo', 'qwant'],
+          publishedDate: '2024-03-10',
+        },
+        {
+          title: 'GitHub - searxng/searxng',
+          url: 'https://github.com/searxng/searxng',
+          content: 'SearXNG repository on GitHub.',
+          engine: 'github',
+        },
+        {
+          // Test fallbacks for missing optional fields
+        },
+      ]
+
+      const normalized = normalizeSearxngWebResults(rawItems)
+      assert.equal(normalized.length, 3)
+
+      assert.equal(normalized[0].id, 'searxng-web-1')
+      assert.equal(normalized[0].title, 'SearXNG - A privacy-respecting metasearch engine')
+      assert.equal(normalized[0].domain, 'docs.searxng.org')
+      assert.equal(normalized[0].metadata, 'duckduckgo, qwant')
+      assert.equal(normalized[0].description.includes('free internet metasearch engine'), true)
+      assert.equal(normalized[0].date, '2024-03-10')
+      assert.equal(normalized[0].isDemo, false)
+
+      assert.equal(normalized[1].id, 'searxng-web-2')
+      assert.equal(normalized[1].metadata, 'github')
+      assert.equal(normalized[1].domain, 'github.com')
+
+      // Fallbacks
+      assert.equal(normalized[2].title, 'Untitled')
+      assert.equal(normalized[2].url, '')
+      assert.equal(normalized[2].description, '')
+      assert.equal(normalized[2].domain, '')
+      assert.equal(normalized[2].metadata, 'Web')
+    })
+
+    it('should throw 503 PROVIDER_NOT_CONFIGURED when SEARXNG_URL is missing', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('', 5000)
+
+      await assert.rejects(
+        async () => {
+          await provider.search('privacy')
+        },
+        (err: any) => {
+          assert.equal(err.statusCode, 503)
+          assert.equal(err.code, 'PROVIDER_NOT_CONFIGURED')
+          assert.ok(err.message.includes('not configured'))
+          return true
+        }
+      )
+    })
+
+    it('should throw 500 INVALID_PROVIDER_URL when SEARXNG_URL is malformed', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('invalid-non-url', 5000)
+
+      await assert.rejects(
+        async () => {
+          await provider.search('test')
+        },
+        (err: any) => {
+          assert.equal(err.statusCode, 500)
+          assert.equal(err.code, 'INVALID_PROVIDER_URL')
+          return true
+        }
+      )
+    })
+
+    it('should handle empty results gracefully without throwing', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('http://localhost:8080', 5000)
+
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async () =>
+          new Response(JSON.stringify({ query: 'empty-term', number_of_results: 0, results: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+
+        const res = await provider.search('empty-term')
+        assert.equal(res.provider, 'searxng')
+        assert.equal(res.isDemo, false)
+        assert.equal(res.results.length, 0)
+        assert.ok(res.resultCount.includes('No results found'))
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
+    it('should handle malformed non-JSON upstream response with 502', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('http://localhost:8080', 5000)
+
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async () =>
+          new Response('<html><body>502 Bad Gateway Cloudflare</body></html>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/html' },
+          })
+
+        await assert.rejects(
+          async () => {
+            await provider.search('query')
+          },
+          (err: any) => {
+            assert.equal(err.statusCode, 502)
+            assert.equal(err.code, 'UPSTREAM_MALFORMED_RESPONSE')
+            return true
+          }
+        )
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
+    it('should handle timeout with 504 SEARCH_TIMEOUT', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('http://localhost:8080', 10)
+
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async () => {
+          const abortError = new Error('The operation was aborted')
+          abortError.name = 'AbortError'
+          throw abortError
+        }
+
+        await assert.rejects(
+          async () => {
+            await provider.search('query')
+          },
+          (err: any) => {
+            assert.equal(err.statusCode, 504)
+            assert.equal(err.code, 'SEARCH_TIMEOUT')
+            return true
+          }
+        )
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
+    it('should handle network connection errors with 502 UPSTREAM_NETWORK_ERROR', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('http://localhost:8080', 5000)
+
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async () => {
+          throw new TypeError('fetch failed: ECONNREFUSED')
+        }
+
+        await assert.rejects(
+          async () => {
+            await provider.search('query')
+          },
+          (err: any) => {
+            assert.equal(err.statusCode, 502)
+            assert.equal(err.code, 'UPSTREAM_NETWORK_ERROR')
+            return true
+          }
+        )
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
+    it('should handle upstream HTTP 429 rate limit with 429 RATE_LIMIT_EXCEEDED', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('http://localhost:8080', 5000)
+
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async () =>
+          new Response('Too Many Requests', { status: 429 })
+
+        await assert.rejects(
+          async () => {
+            await provider.search('query')
+          },
+          (err: any) => {
+            assert.equal(err.statusCode, 429)
+            assert.equal(err.code, 'RATE_LIMIT_EXCEEDED')
+            return true
+          }
+        )
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
+    it('should handle upstream HTTP 500 server error with 502 UPSTREAM_ERROR', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('http://localhost:8080', 5000)
+
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async () =>
+          new Response('Internal Server Error', { status: 500 })
+
+        await assert.rejects(
+          async () => {
+            await provider.search('query')
+          },
+          (err: any) => {
+            assert.equal(err.statusCode, 502)
+            assert.equal(err.code, 'UPSTREAM_ERROR')
+            return true
+          }
+        )
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+  })
+
+  describe('Provider selection and vertical preservation', () => {
+    it('should route non-all verticals to MockSearchProvider even if a live provider is selected', async () => {
+      const { SearchService } = await import('../src/services/search.service.js')
+      const service = new SearchService()
+
+      // Images vertical must return mock images
+      const imgRes = await service.search('privacy', 'images')
+      assert.equal(imgRes.vertical, 'images')
+      assert.equal(imgRes.isDemo, true)
+      assert.ok(imgRes.results.length > 0)
+
+      // News vertical must return mock news
+      const newsRes = await service.search('open source', 'news')
+      assert.equal(newsRes.vertical, 'news')
+      assert.equal(newsRes.isDemo, true)
+      assert.ok(newsRes.results.length > 0)
+    })
+  })
 })
 
