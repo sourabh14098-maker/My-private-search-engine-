@@ -62,6 +62,32 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(res.body.code, 'INVALID_VERTICAL')
       assert.ok(res.body.message.includes('Unsupported vertical'))
     })
+
+    it('should reject repeated vertical parameters with 400 instead of crashing into 500', async () => {
+      const res = await request(app).get('/api/search?q=privacy&v=all&v=images')
+
+      assert.equal(res.status, 400)
+      assert.equal(res.body.error, true)
+      assert.equal(res.body.code, 'INVALID_VERTICAL')
+      assert.ok(res.body.message.includes('must be a single string'))
+    })
+
+    it('should reject repeated query parameters with 400 instead of 500', async () => {
+      const res = await request(app).get('/api/search?q=privacy&q=security&v=all')
+
+      assert.equal(res.status, 400)
+      assert.equal(res.body.error, true)
+      assert.equal(res.body.code, 'INVALID_QUERY')
+      assert.ok(res.body.message.includes('must be a single string'))
+    })
+
+    it('should reject object query parameter with 400', async () => {
+      const res = await request(app).get('/api/search?q[nested]=value&v=all')
+
+      assert.equal(res.status, 400)
+      assert.equal(res.body.error, true)
+      assert.equal(res.body.code, 'INVALID_QUERY')
+    })
   })
 
   describe('GET /api/search verticals (Demo Mode)', () => {
@@ -531,5 +557,92 @@ describe('Backend Foundation API Tests', () => {
       assert.ok(newsRes.results.length > 0)
     })
   })
+
+  describe('Search rate limiting middleware (Zero-Dependency)', () => {
+    it('should set RateLimit response headers on search requests', async () => {
+      const res = await request(app)
+        .get('/api/search?q=privacy&v=all')
+        .set('x-test-rate-limit', 'true')
+
+      assert.equal(res.status, 200)
+      assert.ok(res.headers['ratelimit-limit'])
+      assert.ok(res.headers['ratelimit-remaining'] !== undefined)
+      assert.ok(res.headers['ratelimit-reset'])
+    })
+
+    it('should block excessive requests with HTTP 429 when threshold is exceeded', async () => {
+      const { createRateLimiter } = await import('../src/middleware/rateLimiter.js')
+      const express = (await import('express')).default
+      const testApp = express()
+      const strictLimiter = createRateLimiter({ windowMs: 60000, max: 2 })
+
+      testApp.get('/test-search', strictLimiter, (_req, res) => {
+        res.json({ ok: true })
+      })
+
+      // Request 1: OK
+      const res1 = await request(testApp).get('/test-search').set('x-test-rate-limit', 'true')
+      assert.equal(res1.status, 200)
+
+      // Request 2: OK
+      const res2 = await request(testApp).get('/test-search').set('x-test-rate-limit', 'true')
+      assert.equal(res2.status, 200)
+
+      // Request 3: Exceeded -> HTTP 429
+      const res3 = await request(testApp).get('/test-search').set('x-test-rate-limit', 'true')
+      assert.equal(res3.status, 429)
+      assert.equal(res3.body.error, true)
+      assert.equal(res3.body.code, 'RATE_LIMIT_EXCEEDED')
+      assert.ok(res3.headers['retry-after'])
+      assert.equal(res3.headers['ratelimit-remaining'], '0')
+    })
+
+    it('should never rate-limit health check endpoint', async () => {
+      const res = await request(app).get('/api/health')
+      assert.equal(res.status, 200)
+      assert.equal(res.body.status, 'healthy')
+    })
+  })
+
+  describe('URL Sanitization & DOM XSS Prevention (sanitizeSafeUrl)', () => {
+    it('should allow valid HTTPS and HTTP URLs', async () => {
+      const { sanitizeSafeUrl } = await import('../../src/utils/url.js')
+
+      assert.equal(sanitizeSafeUrl('https://wikipedia.org/wiki/Search'), 'https://wikipedia.org/wiki/Search')
+      assert.equal(sanitizeSafeUrl('http://example.com/docs'), 'http://example.com/docs')
+    })
+
+    it('should normalize protocol-less web domains to HTTPS', async () => {
+      const { sanitizeSafeUrl } = await import('../../src/utils/url.js')
+
+      assert.equal(sanitizeSafeUrl('developer.mozilla.org/en-US'), 'https://developer.mozilla.org/en-US')
+      assert.equal(sanitizeSafeUrl('github.com/topics/privacy'), 'https://github.com/topics/privacy')
+    })
+
+    it('should neutralize dangerous javascript: schemes to inert hash (#)', async () => {
+      const { sanitizeSafeUrl } = await import('../../src/utils/url.js')
+
+      assert.equal(sanitizeSafeUrl('javascript:alert(1)'), '#')
+      assert.equal(sanitizeSafeUrl('JAVASCRIPT:alert(document.cookie)'), '#')
+      assert.equal(sanitizeSafeUrl('  javascript:void(0)'), '#')
+    })
+
+    it('should neutralize data:, vbscript:, and file: schemes to inert hash (#)', async () => {
+      const { sanitizeSafeUrl } = await import('../../src/utils/url.js')
+
+      assert.equal(sanitizeSafeUrl('data:text/html,<script>alert(1)</script>'), '#')
+      assert.equal(sanitizeSafeUrl('vbscript:msgbox("xss")'), '#')
+      assert.equal(sanitizeSafeUrl('file:///etc/passwd'), '#')
+    })
+
+    it('should return # for empty, whitespace, or invalid URL inputs', async () => {
+      const { sanitizeSafeUrl } = await import('../../src/utils/url.js')
+
+      assert.equal(sanitizeSafeUrl(''), '#')
+      assert.equal(sanitizeSafeUrl('   '), '#')
+      assert.equal(sanitizeSafeUrl(undefined), '#')
+    })
+  })
 })
+
 

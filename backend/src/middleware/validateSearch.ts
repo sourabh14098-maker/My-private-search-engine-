@@ -16,7 +16,19 @@ export function validateSearchRequest(req: Request, res: Response, next: NextFun
     return
   }
 
-  const query = String(queryParam).trim()
+  // Reject repeated or non-string query parameters (e.g. ?q=a&q=b or ?q[]=val)
+  if (Array.isArray(queryParam) || typeof queryParam !== 'string') {
+    res.status(400).json({
+      error: true,
+      code: 'INVALID_QUERY',
+      message: "Query parameter 'q' must be a single string.",
+      statusCode: 400,
+      timestamp: new Date().toISOString(),
+    })
+    return
+  }
+
+  const query = queryParam.trim()
 
   if (query.length === 0) {
     res.status(400).json({
@@ -41,7 +53,20 @@ export function validateSearchRequest(req: Request, res: Response, next: NextFun
   }
 
   // Validate vertical parameter if provided (support 'vertical', 'mode', or shorthand 'v')
-  const rawVertical = (req.query.vertical || req.query.mode || req.query.v || 'all') as string
+  const rawVertical = req.query.vertical ?? req.query.mode ?? req.query.v ?? 'all'
+
+  // Reject repeated or non-string vertical parameters (e.g. ?v=all&v=images)
+  if (Array.isArray(rawVertical) || typeof rawVertical !== 'string') {
+    res.status(400).json({
+      error: true,
+      code: 'INVALID_VERTICAL',
+      message: "Vertical parameter ('v', 'vertical', or 'mode') must be a single string.",
+      statusCode: 400,
+      timestamp: new Date().toISOString(),
+    })
+    return
+  }
+
   const normalizedVertical = rawVertical.toLowerCase().trim() as SearchVertical
 
   if (!SUPPORTED_VERTICALS.includes(normalizedVertical)) {

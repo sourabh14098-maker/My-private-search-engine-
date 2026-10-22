@@ -1,5 +1,6 @@
 import { ArrowUpRight, Clock, ExternalLink, Globe, MapPin, Play, ShoppingBag, Star } from 'lucide-react'
 import type { BookResult, ImageResult, NewsResult, PlaceResult, ProductResult, VideoResult } from '../../types'
+import { sanitizeSafeUrl } from '../../utils/url'
 
 export function ImageResults({ results, onPreview }: { results: ImageResult[]; onPreview: (result: ImageResult) => void }) {
   return (
@@ -29,7 +30,9 @@ export function VideoResults({ results }: { results: VideoResult[] }) {
   return (
     <div className="media-list" role="feed" aria-label="Video search results">
       {results.map((result) => {
-        const destUrl = result.destinationUrl || `https://www.youtube.com/results?search_query=${encodeURIComponent(result.title)}`
+        const rawDest = result.destinationUrl || `https://www.youtube.com/results?search_query=${encodeURIComponent(result.title)}`
+        const destUrl = sanitizeSafeUrl(rawDest)
+        const isSafe = destUrl !== '#'
         return (
           <article className="video-result" key={result.id}>
             <a
@@ -38,6 +41,9 @@ export function VideoResults({ results }: { results: VideoResult[] }) {
               rel="noopener noreferrer"
               className="thumbnail-link"
               aria-label={`Play ${result.title}`}
+              onClick={(e) => {
+                if (!isSafe) e.preventDefault()
+              }}
             >
               <div className="thumbnail">
                 <img src={result.thumbnailUrl} alt="" loading="lazy" />
@@ -54,6 +60,9 @@ export function VideoResults({ results }: { results: VideoResult[] }) {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="video-title-link"
+                onClick={(e) => {
+                  if (!isSafe) e.preventDefault()
+                }}
               >
                 <h2>
                   <span>{result.title}</span>
@@ -73,7 +82,9 @@ export function NewsResults({ results }: { results: NewsResult[] }) {
   return (
     <div className="news-feed" role="feed" aria-label="News articles feed">
       {results.map((result) => {
-        const destUrl = result.destinationUrl || `https://duckduckgo.com/?q=${encodeURIComponent(result.headline)}&ia=news`
+        const rawDest = result.destinationUrl || `https://duckduckgo.com/?q=${encodeURIComponent(result.headline)}&ia=news`
+        const destUrl = sanitizeSafeUrl(rawDest)
+        const isSafe = destUrl !== '#'
         return (
           <article className="news-card" key={result.id}>
             <div className="news-card-inner">
@@ -94,6 +105,9 @@ export function NewsResults({ results }: { results: NewsResult[] }) {
                   rel="noopener noreferrer"
                   className="news-card-title"
                   aria-label={`${result.headline} from ${result.publisher}`}
+                  onClick={(e) => {
+                    if (!isSafe) e.preventDefault()
+                  }}
                 >
                   <span>{result.headline}</span>
                   <ArrowUpRight size={15} aria-hidden="true" />
@@ -208,7 +222,9 @@ export function ProductResults({ results }: { results: ProductResult[] }) {
   return (
     <div className="product-grid" role="region" aria-label="Shopping product results">
       {results.map((result) => {
-        const productSearchUrl = result.destinationUrl || `https://duckduckgo.com/?q=${encodeURIComponent(result.name)}`
+        const rawUrl = result.destinationUrl || `https://duckduckgo.com/?q=${encodeURIComponent(result.name)}`
+        const productSearchUrl = sanitizeSafeUrl(rawUrl)
+        const isSafe = productSearchUrl !== '#'
         return (
           <article className="product-result" key={result.id}>
             <div className="product-image-wrap">
@@ -225,6 +241,9 @@ export function ProductResults({ results }: { results: ProductResult[] }) {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="product-title-link"
+                onClick={(e) => {
+                  if (!isSafe) e.preventDefault()
+                }}
               >
                 <h2>{result.name}</h2>
               </a>
@@ -248,7 +267,9 @@ export function BookResults({ results }: { results: BookResult[] }) {
   return (
     <div className="book-list" role="feed" aria-label="Book search results">
       {results.map((result) => {
-        const bookSearchUrl = result.destinationUrl || `https://openlibrary.org/search?q=${encodeURIComponent(result.title)}`
+        const rawUrl = result.destinationUrl || `https://openlibrary.org/search?q=${encodeURIComponent(result.title)}`
+        const bookSearchUrl = sanitizeSafeUrl(rawUrl)
+        const isSafe = bookSearchUrl !== '#'
         return (
           <article className="book-result" key={result.id}>
             <img src={result.coverUrl} alt={`Cover of ${result.title}`} loading="lazy" />
@@ -262,6 +283,9 @@ export function BookResults({ results }: { results: BookResult[] }) {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="book-title-link"
+                onClick={(e) => {
+                  if (!isSafe) e.preventDefault()
+                }}
               >
                 <h2>
                   <span>{result.title}</span>

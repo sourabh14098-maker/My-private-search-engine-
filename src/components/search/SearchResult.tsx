@@ -1,5 +1,6 @@
 import { ArrowUpRight, Globe } from 'lucide-react'
 import type { SearchResult as SearchResultType } from '../../types'
+import { sanitizeSafeUrl } from '../../utils/url'
 
 interface SearchResultProps {
   result: SearchResultType
@@ -20,10 +21,12 @@ export function SearchResult({ result, onSitelinkClick }: SearchResultProps) {
     result.breadcrumb ||
     (result.domain ? `${result.domain} > overview` : 'web')
 
-  // True destination link URL with valid protocol
-  const destinationUrl =
+  // True destination link URL with valid protocol and strict protocol sanitization
+  const rawDest =
     result.destinationUrl ||
     (result.url.startsWith('http') ? result.url : `https://${result.url}`)
+  const destinationUrl = sanitizeSafeUrl(rawDest)
+  const isSafeLink = destinationUrl !== '#'
 
   return (
     <article className="result-card" role="article">
@@ -63,6 +66,11 @@ export function SearchResult({ result, onSitelinkClick }: SearchResultProps) {
           rel="noopener noreferrer"
           className="result-card-title"
           aria-label={`${result.title} (opens external source)`}
+          onClick={(e) => {
+            if (!isSafeLink) {
+              e.preventDefault()
+            }
+          }}
         >
           <span>{result.title}</span>
           <ArrowUpRight size={14} className="result-title-arrow" aria-hidden="true" />

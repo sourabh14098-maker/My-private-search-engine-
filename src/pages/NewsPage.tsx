@@ -6,6 +6,7 @@ import { LoadingSkeleton } from '../components/common/LoadingSkeleton'
 import { searchService } from '../services/searchService'
 import type { NewsResult, SearchMode } from '../types'
 import { modePaths } from '../types'
+import { sanitizeSafeUrl } from '../utils/url'
 
 const EMPTY_RESULTS: NewsResult[] = []
 
@@ -141,9 +142,10 @@ export function NewsPage() {
       ) : (
         <div className="news-feed" role="feed" aria-label="News articles feed">
           {results.map((article) => {
-            const destUrl =
+            const rawDest =
               article.destinationUrl ||
               `https://duckduckgo.com/?q=${encodeURIComponent(article.headline)}&ia=news`
+            const destUrl = sanitizeSafeUrl(rawDest)
 
             return (
               <article className="news-card" key={article.id}>
@@ -165,6 +167,11 @@ export function NewsPage() {
                       rel="noopener noreferrer"
                       className="news-card-title"
                       aria-label={`${article.headline} from ${article.publisher} (opens web search)`}
+                      onClick={(e) => {
+                        if (destUrl === '#') {
+                          e.preventDefault()
+                        }
+                      }}
                     >
                       <span>{article.headline}</span>
                       <ArrowUpRight size={15} aria-hidden="true" />
