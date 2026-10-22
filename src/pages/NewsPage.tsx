@@ -15,7 +15,7 @@ export function NewsPage() {
   const [params] = useSearchParams()
   const query = params.get('q') || ''
 
-  const [request, setRequest] = useState<{ query: string; results: NewsResult[] } | null>(null)
+  const [request, setRequest] = useState<{ query: string; results: NewsResult[]; isDemo?: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export function NewsPage() {
     searchService.news(query)
       .then((response) => {
         if (!cancelled) {
-          setRequest({ query, results: response.results })
+          setRequest({ query, results: response.results, isDemo: response.isDemo })
           setError(null)
         }
       })
@@ -122,6 +122,7 @@ export function NewsPage() {
       resultCount={resultCount}
       placeholder="Search news & independent journalism..."
       sidebar={sidebarContent}
+      isDemo={request ? request.isDemo ?? true : true}
     >
       {error ? (
         <div className="search-error-state" role="alert">

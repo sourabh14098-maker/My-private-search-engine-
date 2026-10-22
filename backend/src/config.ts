@@ -16,6 +16,7 @@ export interface AppConfig {
   searchTimeoutMs: number
 }
 
+// Resolves active search provider: mock, brave, or local searxng
 const rawProvider = (process.env.SEARCH_PROVIDER || '').toLowerCase().trim()
 const searchProvider: SearchProviderType =
   rawProvider === 'brave' || rawProvider === 'mock' || rawProvider === 'searxng'

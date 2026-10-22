@@ -1,4 +1,4 @@
-import { config } from '../config.js'
+import { config, type SearchProviderType } from '../config.js'
 import { MockSearchProvider } from './mockProvider.js'
 import { BraveSearchProvider } from './providers/brave.provider.js'
 import { SearxngSearchProvider } from './providers/searxng.provider.js'
@@ -14,10 +14,12 @@ export class SearchService {
   private searxngProvider: SearchProvider
   private mockProvider: typeof MockSearchProvider
   private isCustomProvider: boolean
+  private activeProviderType?: SearchProviderType
 
-  constructor(customProvider?: SearchProvider) {
+  constructor(customProvider?: SearchProvider, providerType?: SearchProviderType) {
     this.isCustomProvider = Boolean(customProvider)
     this.customProvider = customProvider
+    this.activeProviderType = providerType
     this.braveProvider = customProvider || new BraveSearchProvider()
     this.searxngProvider = customProvider || new SearxngSearchProvider()
     this.mockProvider = MockSearchProvider
@@ -29,12 +31,14 @@ export class SearchService {
       return this.customProvider.search(query, vertical)
     }
 
+    const providerType = this.activeProviderType || config.searchProvider
+
     // Route 'all' (Web) vertical to configured live provider
     if (vertical === 'all') {
-      if (config.searchProvider === 'searxng') {
+      if (providerType === 'searxng') {
         return this.searxngProvider.search(query, vertical)
       }
-      if (config.searchProvider === 'brave') {
+      if (providerType === 'brave') {
         return this.braveProvider.search(query, vertical)
       }
     }
@@ -45,3 +49,4 @@ export class SearchService {
 }
 
 export const searchService = new SearchService()
+

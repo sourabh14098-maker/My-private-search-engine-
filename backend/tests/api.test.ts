@@ -90,20 +90,23 @@ describe('Backend Foundation API Tests', () => {
     })
   })
 
-  describe('GET /api/search verticals (Demo Mode)', () => {
-    it('should return valid Web (All) results explicitly marked as demo', async () => {
+  describe('GET /api/search verticals', () => {
+    it('should return valid Web (All) results matching active provider', async () => {
       const res = await request(app).get('/api/search?q=open%20source&v=all')
 
       assert.equal(res.status, 200)
       assert.equal(res.body.query, 'open source')
       assert.equal(res.body.vertical, 'all')
-      assert.equal(res.body.isDemo, true)
-      assert.equal(res.body.provider, 'mock-index')
-      assert.equal(res.body.metadata.isIndexedData, false)
+      if (res.body.provider === 'searxng') {
+        assert.equal(res.body.isDemo, false)
+        assert.equal(res.body.metadata.isIndexedData, true)
+      } else {
+        assert.equal(res.body.isDemo, true)
+        assert.equal(res.body.provider, 'mock-index')
+        assert.equal(res.body.metadata.isIndexedData, false)
+      }
       assert.ok(Array.isArray(res.body.results))
       assert.ok(res.body.results.length > 0)
-      assert.ok(Array.isArray(res.body.discussions))
-      assert.ok(Array.isArray(res.body.relatedSearches))
     })
 
     it('should default to "all" vertical when v parameter is omitted', async () => {
@@ -111,7 +114,11 @@ describe('Backend Foundation API Tests', () => {
 
       assert.equal(res.status, 200)
       assert.equal(res.body.vertical, 'all')
-      assert.equal(res.body.isDemo, true)
+      if (res.body.provider === 'searxng') {
+        assert.equal(res.body.isDemo, false)
+      } else {
+        assert.equal(res.body.isDemo, true)
+      }
     })
 
     it('should return valid Image results with dimensions', async () => {
@@ -537,9 +544,36 @@ describe('Backend Foundation API Tests', () => {
         globalThis.fetch = originalFetch
       }
     })
+
+    it('should handle upstream HTTP 401 or 403 access denied with 502 PROVIDER_AUTHENTICATION_ERROR', async () => {
+      const { SearxngSearchProvider } = await import(
+        '../src/services/providers/searxng.provider.js'
+      )
+      const provider = new SearxngSearchProvider('http://localhost:8080', 5000)
+
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async () =>
+          new Response('Forbidden: JSON format disabled in settings.yml', { status: 403 })
+
+        await assert.rejects(
+          async () => {
+            await provider.search('query')
+          },
+          (err: any) => {
+            assert.equal(err.statusCode, 502)
+            assert.equal(err.code, 'PROVIDER_AUTHENTICATION_ERROR')
+            assert.ok(err.message.includes('access denied'))
+            return true
+          }
+        )
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
   })
 
-  describe('Provider selection and vertical preservation', () => {
+  describe('Provider selection, fallback honesty, and vertical preservation', () => {
     it('should route non-all verticals to MockSearchProvider even if a live provider is selected', async () => {
       const { SearchService } = await import('../src/services/search.service.js')
       const service = new SearchService()
@@ -555,6 +589,66 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(newsRes.vertical, 'news')
       assert.equal(newsRes.isDemo, true)
       assert.ok(newsRes.results.length > 0)
+    })
+
+    it('should route to MockSearchProvider when provider is mock and never claim live status', async () => {
+      const { SearchService } = await import('../src/services/search.service.js')
+      const mockService = new SearchService(undefined, 'mock')
+
+      const res = await mockService.search('privacy test', 'all')
+      assert.equal(res.provider, 'mock-index')
+      assert.equal(res.isDemo, true)
+      assert.equal(res.metadata.isIndexedData, false)
+      assert.ok(res.results.every((r) => r.isDemo === true))
+    })
+
+    it('should route to SearxngSearchProvider when provider is searxng', async () => {
+      const { SearchService } = await import('../src/services/search.service.js')
+      const { SearxngSearchProvider } = await import('../src/services/providers/searxng.provider.js')
+
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async () =>
+          new Response(
+            JSON.stringify({
+              query: 'privacy',
+              number_of_results: 1,
+              results: [
+                {
+                  title: 'SearXNG Mock Test',
+                  url: 'https://example.com/searxng',
+                  content: 'Test content',
+                },
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+
+        const searxngProvider = new SearxngSearchProvider('http://localhost:8888', 5000)
+        const searxngService = new SearchService(searxngProvider, 'searxng')
+
+        const res = await searxngService.search('privacy', 'all')
+        assert.equal(res.provider, 'searxng')
+        assert.equal(res.isDemo, false)
+        assert.equal(res.metadata.isIndexedData, true)
+        assert.equal(res.results.length, 1)
+        assert.equal(res.results[0].title, 'SearXNG Mock Test')
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
+    it('should ensure mock mode fallback never silently masquerades as live results', async () => {
+      const { MockSearchProvider } = await import('../src/services/mockProvider.js')
+      const res = MockSearchProvider.search('open source', 'all')
+
+      assert.equal(res.isDemo, true)
+      assert.equal(res.provider, 'mock-index')
+      assert.equal(res.metadata.isIndexedData, false)
+      assert.ok(
+        res.metadata.notice.toLowerCase().includes('mock') ||
+        res.metadata.notice.toLowerCase().includes('demo')
+      )
     })
   })
 

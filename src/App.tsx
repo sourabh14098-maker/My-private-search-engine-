@@ -161,6 +161,7 @@ function VerticalPage({ mode }: { mode: Exclude<SearchMode, 'all' | 'ai' | 'news
       placeholder={placeholders[mode] || 'Search the web freely...'}
       layoutVariant={mode === 'images' ? 'full' : 'standard'}
       sidebar={sidebar}
+      isDemo={request ? request.data.isDemo ?? true : true}
     >
       {error ? (
         <div className="search-error-state" role="alert">
@@ -317,6 +318,7 @@ function AIPage() {
       resultCount={resultCount}
       placeholder="Ask AI anything private..."
       sidebar={sidebar}
+      isDemo={data ? data.isDemo ?? true : true}
     >
       {error ? (
         <div className="search-error-state" role="alert">

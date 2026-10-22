@@ -74,6 +74,8 @@ export function SearchPage() {
     <KnowledgeCard query={query} />
   ) : undefined
 
+  const isDemo = data ? Boolean(data.isDemo ?? (data.results.length > 0 && data.results.some((r) => r.isDemo))) : false
+
   return (
     <SearchLayout
       mode="all"
@@ -83,6 +85,7 @@ export function SearchPage() {
       resultCount={resultCount}
       placeholder="Search the web freely..."
       sidebar={sidebar}
+      isDemo={isDemo}
     >
       {error ? (
         <div className="search-error-state" role="alert">

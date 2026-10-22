@@ -51,14 +51,16 @@ export interface SearchResponse {
   relatedSearches?: string[]
   questions?: { question: string; answer: string }[]
   discussions?: DiscussionItem[]
+  isDemo?: boolean
+  provider?: string
 }
 
-export interface ImageSearchResponse { query: string; results: ImageResult[] }
-export interface VideoSearchResponse { query: string; results: VideoResult[] }
-export interface NewsSearchResponse { query: string; results: NewsResult[] }
-export interface PlaceSearchResponse { query: string; results: PlaceResult[] }
-export interface ProductSearchResponse { query: string; results: ProductResult[] }
-export interface BookSearchResponse { query: string; results: BookResult[] }
+export interface ImageSearchResponse { query: string; results: ImageResult[]; isDemo?: boolean; provider?: string }
+export interface VideoSearchResponse { query: string; results: VideoResult[]; isDemo?: boolean; provider?: string }
+export interface NewsSearchResponse { query: string; results: NewsResult[]; isDemo?: boolean; provider?: string }
+export interface PlaceSearchResponse { query: string; results: PlaceResult[]; isDemo?: boolean; provider?: string }
+export interface ProductSearchResponse { query: string; results: ProductResult[]; isDemo?: boolean; provider?: string }
+export interface BookSearchResponse { query: string; results: BookResult[]; isDemo?: boolean; provider?: string }
 
 export interface AISummary { answer: string; sources: { title: string; domain: string; url: string }[]; relatedQuestions: string[]; status: 'mock' | 'ready' }
 export interface AISearchResponse extends SearchResponse { aiSummary?: AISummary }

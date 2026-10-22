@@ -14,6 +14,7 @@ interface SearchHeaderProps {
   showFilters?: boolean
   onToggleFilters?: () => void
   placeholder?: string
+  isDemo?: boolean
 }
 
 export function SearchHeader({
@@ -24,6 +25,7 @@ export function SearchHeader({
   showFilters = false,
   onToggleFilters,
   placeholder = 'Search the web freely...',
+  isDemo,
 }: SearchHeaderProps) {
   const navigate = useNavigate()
 
@@ -63,13 +65,15 @@ export function SearchHeader({
           </div>
 
           <div className="search-header-actions">
-            <span
-              className="results-private"
-              title="Frontend prototype — queries are evaluated locally in-browser with mock index data"
-            >
-              <ShieldCheck size={14} aria-hidden="true" />
-              <span className="private-label">Local Demo</span>
-            </span>
+            {isDemo && (
+              <span
+                className="results-private"
+                title="Frontend prototype — queries are evaluated locally in-browser with mock index data"
+              >
+                <ShieldCheck size={14} aria-hidden="true" />
+                <span className="private-label">Local Demo</span>
+              </span>
+            )}
             {onToggleFilters && (
               <button
                 type="button"

@@ -17,6 +17,7 @@ interface SearchLayoutProps {
   sidebar?: ReactNode
   children: ReactNode
   enableFilters?: boolean
+  isDemo?: boolean
 }
 
 export function SearchLayout({
@@ -30,6 +31,7 @@ export function SearchLayout({
   sidebar,
   children,
   enableFilters = true,
+  isDemo,
 }: SearchLayoutProps) {
   const [showFilters, setShowFilters] = useState(false)
 
@@ -44,6 +46,7 @@ export function SearchLayout({
         showFilters={showFilters}
         onToggleFilters={enableFilters ? () => setShowFilters((prev) => !prev) : undefined}
         placeholder={placeholder}
+        isDemo={isDemo}
       />
 
       {/* Main Results Container */}

@@ -128,6 +128,8 @@ export function getMockSearchResponse(query: string): SearchResponse {
             'SB Payment Service provides integrated online payment gateway solutions, credit card processing, QR code payments, and carrier billing.',
         },
       ],
+      isDemo: true,
+      provider: 'mock-index',
     }
   }
 
@@ -265,6 +267,8 @@ export function getMockSearchResponse(query: string): SearchResponse {
             'Records provide concise syntax to declare immutable data carriers with automatic implementations of getters, equals(), hashCode(), and toString().',
         },
       ],
+      isDemo: true,
+      provider: 'mock-index',
     }
   }
 
@@ -393,5 +397,7 @@ export function getMockSearchResponse(query: string): SearchResponse {
         answer: `It prioritizes user control, simplicity, and efficiency, minimizing overhead without sacrificing capability.`,
       },
     ],
+    isDemo: true,
+    provider: 'mock-index',
   }
 }

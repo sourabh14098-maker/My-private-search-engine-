@@ -19,9 +19,11 @@ import type {
 } from '../types'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-const withQuery = <T>(query: string, results: T): { query: string; results: T } => ({
+const withQuery = <T>(query: string, results: T): { query: string; results: T; isDemo: boolean; provider: string } => ({
   query,
   results,
+  isDemo: true,
+  provider: 'mock-index',
 })
 
 /**
@@ -68,12 +70,16 @@ async function fetchVerticalFromBackend<T>(
           relatedSearches: data.relatedSearches || [],
           questions: data.questions || [],
           aiSummary: data.aiSummary,
+          isDemo: typeof data.isDemo === 'boolean' ? data.isDemo : false,
+          provider: data.provider,
         } as unknown as T
       }
 
       return {
         query: data.query,
         results: data.results,
+        isDemo: typeof data.isDemo === 'boolean' ? data.isDemo : false,
+        provider: data.provider,
       } as unknown as T
     }
 
