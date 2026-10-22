@@ -165,6 +165,18 @@ export class MockSearchProvider {
           answer: `It prioritizes user control, simplicity, and efficiency, minimizing overhead without sacrificing capability.`,
         },
       ],
+      aiAnswer: {
+        status: 'unavailable',
+        provider: 'none',
+        notice: 'AI Answer Layer is not configured in prototype mode. To preserve privacy, DitchX does not query external AI clouds.',
+        sources: results.slice(0, 3).map((r) => ({
+          title: r.title,
+          url: r.url,
+          destinationUrl: r.destinationUrl || r.url,
+          domain: r.domain,
+          snippet: r.description,
+        })),
+      },
       metadata: {
         executionTimeMs: Date.now() - startTime,
         timestamp: new Date().toISOString(),

@@ -4,7 +4,9 @@ import type {
   SearchApiResponse,
   WebSearchResult,
   SearchVertical,
+  QuickContextData,
 } from '../../types/api.js'
+import { aiAnswerService } from '../ai.service.js'
 
 export interface SearxngResultItem {
   title?: string
@@ -20,16 +22,62 @@ export interface SearxngResultItem {
   [key: string]: unknown
 }
 
+export interface SearxngInfoboxItem {
+  infobox?: string
+  id?: string
+  content?: string
+  img_src?: string
+  urls?: Array<{ title?: string; url?: string }>
+  engine?: string
+  engines?: string[]
+  attributes?: Array<{ label?: string; value?: string; [key: string]: unknown }>
+  [key: string]: unknown
+}
+
 export interface SearxngRawResponse {
   query?: string
   number_of_results?: number
   results?: SearxngResultItem[]
   answers?: unknown[]
   corrections?: unknown[]
-  infoboxes?: unknown[]
+  infoboxes?: SearxngInfoboxItem[]
   suggestions?: string[]
   unresponsive_engines?: unknown[]
   [key: string]: unknown
+}
+
+export function normalizeSearxngInfobox(rawInfobox?: SearxngInfoboxItem): QuickContextData | undefined {
+  if (!rawInfobox || typeof rawInfobox !== 'object') return undefined
+
+  const title = (rawInfobox.infobox || '').trim()
+  const content = (rawInfobox.content || '').trim()
+
+  if (!title && !content) return undefined
+
+  const primaryUrl = Array.isArray(rawInfobox.urls) && rawInfobox.urls.length > 0
+    ? rawInfobox.urls[0]?.url || rawInfobox.id
+    : rawInfobox.id
+
+  const sourceTitle = Array.isArray(rawInfobox.urls) && rawInfobox.urls.length > 0
+    ? rawInfobox.urls[0]?.title || rawInfobox.engine || 'Wikipedia'
+    : rawInfobox.engine || 'Wikipedia'
+
+  const attributes = Array.isArray(rawInfobox.attributes)
+    ? rawInfobox.attributes
+        .filter((attr) => attr && typeof attr.label === 'string' && typeof attr.value === 'string')
+        .slice(0, 6)
+        .map((attr) => ({ label: attr.label!.trim(), value: attr.value!.trim() }))
+    : undefined
+
+  return {
+    title: title || 'Quick Context',
+    content,
+    url: primaryUrl || undefined,
+    destinationUrl: primaryUrl || undefined,
+    source: sourceTitle,
+    imageUrl: rawInfobox.img_src || undefined,
+    attributes: attributes && attributes.length > 0 ? attributes : undefined,
+  }
 }
 
 export function normalizeSearxngWebResults(rawResults: SearxngResultItem[]): WebSearchResult[] {
@@ -189,6 +237,11 @@ export class SearxngSearchProvider {
 
     const rawResults = Array.isArray(rawData.results) ? rawData.results : []
     const webResults = normalizeSearxngWebResults(rawResults)
+    const rawInfobox = Array.isArray(rawData.infoboxes) && rawData.infoboxes.length > 0
+      ? (rawData.infoboxes[0] as SearxngInfoboxItem)
+      : undefined
+    const quickContext = normalizeSearxngInfobox(rawInfobox)
+    const aiAnswer = await aiAnswerService.generateAnswer(query, webResults, quickContext)
     const executionTimeMs = Date.now() - startTime
 
     const relatedSearches =
@@ -207,6 +260,8 @@ export class SearxngSearchProvider {
           : `No results found for "${query}" (SearXNG Metasearch)`,
       results: webResults,
       relatedSearches,
+      aiAnswer,
+      quickContext,
       metadata: {
         executionTimeMs,
         timestamp: new Date().toISOString(),

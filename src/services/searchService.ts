@@ -70,6 +70,8 @@ async function fetchVerticalFromBackend<T>(
           relatedSearches: data.relatedSearches || [],
           questions: data.questions || [],
           aiSummary: data.aiSummary,
+          aiAnswer: data.aiAnswer,
+          quickContext: data.quickContext,
           isDemo: typeof data.isDemo === 'boolean' ? data.isDemo : false,
           provider: data.provider,
         } as unknown as T

@@ -119,6 +119,33 @@ export interface AISummaryData {
   status: 'mock' | 'ready'
 }
 
+export interface AnswerSource {
+  title: string
+  url: string
+  destinationUrl?: string
+  domain: string
+  snippet?: string
+}
+
+export interface QuickContextData {
+  title: string
+  content: string
+  url?: string
+  destinationUrl?: string
+  source?: string
+  imageUrl?: string
+  attributes?: { label: string; value: string }[]
+}
+
+export interface AIAnswerData {
+  status: 'ready' | 'unavailable' | 'unsupported' | 'error'
+  answer?: string
+  provider?: string
+  model?: string
+  notice?: string
+  sources?: AnswerSource[]
+}
+
 export interface SearchResponseMetadata {
   executionTimeMs: number
   timestamp: string
@@ -138,6 +165,8 @@ export interface SearchApiResponse<T = unknown> {
   relatedSearches?: string[]
   questions?: { question: string; answer: string }[]
   aiSummary?: AISummaryData
+  aiAnswer?: AIAnswerData
+  quickContext?: QuickContextData
   metadata: SearchResponseMetadata
 }
 
@@ -151,6 +180,8 @@ export interface HealthApiResponse {
   demoMode: boolean
   searchProvider?: string
   providerConfigured?: boolean
+  aiProvider?: string
+  aiConfigured?: boolean
   supportedVerticals: SearchVertical[]
 }
 

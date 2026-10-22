@@ -24,6 +24,8 @@ export function getHealth(_req: Request, res: Response): void {
     demoMode: config.demoMode,
     searchProvider: config.searchProvider,
     providerConfigured: isConfigured,
+    aiProvider: config.aiProvider,
+    aiConfigured: config.aiProvider !== 'none',
     supportedVerticals: [
       'all',
       'images',

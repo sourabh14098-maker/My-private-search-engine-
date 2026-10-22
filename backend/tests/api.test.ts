@@ -12,6 +12,8 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(res.body.status, 'healthy')
       assert.equal(typeof res.body.uptimeSeconds, 'number')
       assert.equal(typeof res.body.demoMode, 'boolean')
+      assert.equal(res.body.aiProvider, 'none')
+      assert.equal(res.body.aiConfigured, false)
       assert.ok(Array.isArray(res.body.supportedVerticals))
       assert.ok(res.body.supportedVerticals.includes('all'))
       assert.ok(res.body.supportedVerticals.includes('images'))
@@ -737,6 +739,135 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(sanitizeSafeUrl(undefined), '#')
     })
   })
+
+  describe('AI Answer Layer & Quick Context normalization', () => {
+    it('should normalize SearXNG infobox with title, content, attributes, image, and citations', async () => {
+      const { normalizeSearxngInfobox } = await import('../src/services/providers/searxng.provider.js')
+
+      const rawInfobox = {
+        infobox: 'Linux',
+        id: 'https://en.wikipedia.org/wiki/Linux',
+        content: 'Linux is a family of open-source Unix-like operating systems based on the Linux kernel.',
+        img_src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/Tux.svg/1200px-Tux.svg.png',
+        urls: [
+          { title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Linux' },
+          { title: 'Official website', url: 'https://kernel.org' },
+        ],
+        attributes: [
+          { label: 'Developer', value: 'Linus Torvalds and others' },
+          { label: 'Written in', value: 'C, Assembly language' },
+          { label: 'OS family', value: 'Unix-like' },
+          { label: 'Initial release', value: 'September 17, 1991' },
+          { label: 'License', value: 'GPLv2 and others' },
+          { label: 'Platforms', value: 'x86, ARM, RISC-V, others' },
+          { label: 'Extra attribute', value: 'Should be sliced if > 6' },
+        ],
+      }
+
+      const quickContext = normalizeSearxngInfobox(rawInfobox)
+
+      assert.ok(quickContext)
+      assert.equal(quickContext.title, 'Linux')
+      assert.ok(quickContext.content.includes('Linux is a family of open-source'))
+      assert.equal(quickContext.url, 'https://en.wikipedia.org/wiki/Linux')
+      assert.equal(quickContext.destinationUrl, 'https://en.wikipedia.org/wiki/Linux')
+      assert.equal(quickContext.source, 'Wikipedia')
+      assert.ok(quickContext.imageUrl?.includes('Tux.svg'))
+      assert.ok(Array.isArray(quickContext.attributes))
+      assert.equal(quickContext.attributes.length, 6)
+      assert.equal(quickContext.attributes[0].label, 'Developer')
+      assert.equal(quickContext.attributes[0].value, 'Linus Torvalds and others')
+    })
+
+    it('should return undefined for empty, malformed, or missing infobox', async () => {
+      const { normalizeSearxngInfobox } = await import('../src/services/providers/searxng.provider.js')
+
+      assert.equal(normalizeSearxngInfobox(undefined), undefined)
+      assert.equal(normalizeSearxngInfobox({} as any), undefined)
+      assert.equal(normalizeSearxngInfobox({ infobox: '   ', content: '' } as any), undefined)
+    })
+
+    it('should return honest unavailable status and extracted sources when AI_PROVIDER=none', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('none')
+
+      const mockResults = [
+        {
+          id: 'res-1',
+          title: 'Linux Kernel Archives',
+          url: 'https://kernel.org',
+          destinationUrl: 'https://kernel.org',
+          domain: 'kernel.org',
+          description: 'Official site of the Linux kernel source repository.',
+        },
+        {
+          id: 'res-2',
+          title: 'GNU Operating System',
+          url: 'https://gnu.org',
+          destinationUrl: 'https://gnu.org',
+          domain: 'gnu.org',
+          description: 'The GNU Operating System free software project.',
+        },
+      ]
+
+      const answer = await service.generateAnswer('Linux', mockResults as any)
+
+      assert.equal(answer.status, 'unavailable')
+      assert.equal(answer.provider, 'none')
+      assert.ok(answer.notice.includes('To preserve privacy, DitchX does not transmit search queries'))
+      assert.equal(answer.sources.length, 2)
+      assert.equal(answer.sources[0].title, 'Linux Kernel Archives')
+      assert.equal(answer.sources[0].url, 'https://kernel.org')
+      assert.equal(answer.sources[0].domain, 'kernel.org')
+    })
+
+    it('should return unsupported status when query has no supporting results', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama')
+
+      const answer = await service.generateAnswer('nonexistentquery12345', [])
+
+      assert.equal(answer.status, 'unsupported')
+      assert.ok(answer.notice.includes('do not contain enough verified information'))
+      assert.equal(answer.sources.length, 0)
+    })
+
+    it('should extract source citations with clean titles and destination URLs', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService()
+
+      const citations = service.extractSourceCitations([
+        {
+          id: '1',
+          title: 'Privacy International',
+          url: 'https://privacyinternational.org',
+          destinationUrl: 'https://privacyinternational.org/article',
+          domain: 'privacyinternational.org',
+          description: 'Defending privacy across digital networks.',
+        } as any,
+        {
+          id: '2',
+          title: 'Invalid result without URL',
+        } as any,
+      ])
+
+      assert.equal(citations.length, 1)
+      assert.equal(citations[0].title, 'Privacy International')
+      assert.equal(citations[0].destinationUrl, 'https://privacyinternational.org/article')
+      assert.equal(citations[0].domain, 'privacyinternational.org')
+    })
+
+    it('should include aiAnswer in GET /api/search response', async () => {
+      const res = await request(app).get('/api/search?q=privacy&v=all')
+
+      assert.equal(res.status, 200)
+      assert.ok(res.body.aiAnswer)
+      assert.equal(res.body.aiAnswer.status, 'unavailable')
+      assert.equal(res.body.aiAnswer.provider, 'none')
+      assert.ok(Array.isArray(res.body.aiAnswer.sources))
+    })
+  })
 })
+
 
 

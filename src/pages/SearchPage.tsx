@@ -6,7 +6,8 @@ import { SearchResult } from '../components/search/SearchResult'
 import { Discussions } from '../components/search/Discussions'
 import { RelatedSearches } from '../components/search/RelatedSearches'
 import { PeopleAlsoAsk } from '../components/search/PeopleAlsoAsk'
-import { KnowledgeCard } from '../components/search/KnowledgeCard'
+import { AnswerLayer } from '../components/search/AnswerLayer'
+import { QuickContextCard } from '../components/search/QuickContextCard'
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton'
 import { EmptyState } from '../components/common/EmptyState'
 import { searchService } from '../services/searchService'
@@ -70,8 +71,8 @@ export function SearchPage() {
       : data?.resultCount
     : undefined
 
-  const sidebar = !loading && !error && data && data.results.length > 0 ? (
-    <KnowledgeCard query={query} />
+  const sidebar = !loading && !error && data?.quickContext ? (
+    <QuickContextCard data={data.quickContext} />
   ) : undefined
 
   const isDemo = data ? Boolean(data.isDemo ?? (data.results.length > 0 && data.results.some((r) => r.isDemo))) : false
@@ -104,6 +105,9 @@ export function SearchPage() {
         />
       ) : (
         <>
+          {/* Direct Answer & AI Answer Layer */}
+          <AnswerLayer query={query} answer={data.aiAnswer} loading={loading} />
+
           {/* Primary Web Results Feed */}
           <div className="results-list" role="feed" aria-label="Web search results">
             {/* First batch of results */}

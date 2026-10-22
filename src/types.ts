@@ -44,6 +44,33 @@ export interface PlaceResult { id: string; name: string; category: string; ratin
 export interface ProductResult { id: string; name: string; price: string; store: string; rating: number; availability: string; imageUrl: string; destinationUrl?: string }
 export interface BookResult { id: string; title: string; author: string; publicationDate: string; description: string; source: string; coverUrl: string; destinationUrl?: string }
 
+export interface AnswerSource {
+  title: string
+  url: string
+  destinationUrl?: string
+  domain: string
+  snippet?: string
+}
+
+export interface QuickContextData {
+  title: string
+  content: string
+  url?: string
+  destinationUrl?: string
+  source?: string
+  imageUrl?: string
+  attributes?: { label: string; value: string }[]
+}
+
+export interface AIAnswerData {
+  status: 'ready' | 'unavailable' | 'unsupported' | 'error'
+  answer?: string
+  provider?: string
+  model?: string
+  notice?: string
+  sources?: AnswerSource[]
+}
+
 export interface SearchResponse {
   query: string
   resultCount: string
@@ -51,6 +78,8 @@ export interface SearchResponse {
   relatedSearches?: string[]
   questions?: { question: string; answer: string }[]
   discussions?: DiscussionItem[]
+  aiAnswer?: AIAnswerData
+  quickContext?: QuickContextData
   isDemo?: boolean
   provider?: string
 }

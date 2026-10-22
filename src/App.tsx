@@ -6,7 +6,7 @@ import { Navbar } from './components/layout/Navbar'
 import { SearchLayout } from './components/layout/SearchLayout'
 import { AISummary } from './components/search/AISummary'
 import { SearchResult } from './components/search/SearchResult'
-import { KnowledgeCard } from './components/search/KnowledgeCard'
+import { QuickContextCard } from './components/search/QuickContextCard'
 import { PrivacyStatus } from './components/privacy/PrivacyStatus'
 import { Toggle } from './components/common/Toggle'
 import { LoadingSkeleton } from './components/common/LoadingSkeleton'
@@ -141,14 +141,15 @@ function VerticalPage({ mode }: { mode: Exclude<SearchMode, 'all' | 'ai' | 'news
     books: 'Search books, authors, publications...',
   }
 
+  const quickContext = (request?.data as any)?.quickContext
   const sidebar =
     mode === 'maps' ? (
       <div className="map-placeholder">
         <MapLabel />
         <span>Interactive map visualizer (Planned feature · Demo placeholder)</span>
       </div>
-    ) : mode !== 'images' && !error && !loading ? (
-      <KnowledgeCard query={query} />
+    ) : mode !== 'images' && !error && !loading && quickContext ? (
+      <QuickContextCard data={quickContext} />
     ) : undefined
 
   return (
@@ -305,8 +306,8 @@ function AIPage() {
       : data?.resultCount || `Demo AI answer & simulated sources for "${query}" (Mock index)`
     : undefined
 
-  const sidebar = !loading && !error && data && data.results.length > 0 ? (
-    <KnowledgeCard query={query} />
+  const sidebar = !loading && !error && data?.quickContext ? (
+    <QuickContextCard data={data.quickContext} />
   ) : undefined
 
   return (
