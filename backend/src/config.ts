@@ -16,6 +16,9 @@ export interface AppConfig {
   braveApiUrl: string
   searxngUrl: string
   searchTimeoutMs: number
+  ollamaBaseUrl: string
+  ollamaModel: string
+  ollamaTimeoutMs: number
 }
 
 // Resolves active search provider: mock, brave, or local searxng
@@ -45,5 +48,8 @@ export const config: AppConfig = {
   braveApiUrl: process.env.BRAVE_SEARCH_API_URL || 'https://api.search.brave.com/res/v1/web/search',
   searxngUrl: (process.env.SEARXNG_URL || '').trim(),
   searchTimeoutMs: parseInt(process.env.SEARCH_TIMEOUT_MS || '5000', 10),
+  ollamaBaseUrl: (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/+$/, ''),
+  ollamaModel: (process.env.OLLAMA_MODEL || '').trim(),
+  ollamaTimeoutMs: parseInt(process.env.OLLAMA_TIMEOUT_MS || '15000', 10),
 }
 

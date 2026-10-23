@@ -182,6 +182,7 @@ export interface HealthApiResponse {
   providerConfigured?: boolean
   aiProvider?: string
   aiConfigured?: boolean
+  aiModel?: string
   supportedVerticals: SearchVertical[]
 }
 

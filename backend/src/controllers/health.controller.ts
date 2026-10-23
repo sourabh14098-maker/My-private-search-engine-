@@ -25,7 +25,11 @@ export function getHealth(_req: Request, res: Response): void {
     searchProvider: config.searchProvider,
     providerConfigured: isConfigured,
     aiProvider: config.aiProvider,
-    aiConfigured: config.aiProvider !== 'none',
+    aiConfigured:
+      config.aiProvider === 'ollama'
+        ? Boolean(config.ollamaModel)
+        : config.aiProvider !== 'none',
+    aiModel: config.aiProvider === 'ollama' ? config.ollamaModel || undefined : undefined,
     supportedVerticals: [
       'all',
       'images',

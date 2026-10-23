@@ -124,6 +124,15 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
         </div>
       )}
 
+      {status === 'error' && (
+        <div className="answer-layer-notice">
+          <p className="notice-lead">
+            {answer?.notice ||
+              'An error occurred during AI answer synthesis. Organic search results are displayed below.'}
+          </p>
+        </div>
+      )}
+
       {/* Clickable Source Citations */}
       {sources.length > 0 && (
         <div className="answer-layer-sources" aria-label="Retrieved sources for answer synthesis">
