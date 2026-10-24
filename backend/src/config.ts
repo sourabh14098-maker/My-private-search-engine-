@@ -1,6 +1,13 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const backendEnvPath = path.resolve(__dirname, '../.env')
+
+// Load backend/.env reliably regardless of working directory without overriding explicitly supplied variables
 dotenv.config()
+dotenv.config({ path: backendEnvPath })
 
 export type SearchProviderType = 'mock' | 'brave' | 'searxng'
 export type AIProviderType = 'none' | 'ollama' | 'openai' | 'custom'

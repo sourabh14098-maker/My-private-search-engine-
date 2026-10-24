@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import request from 'supertest'
 import { app } from '../src/app.js'
+import { config } from '../src/config.js'
 import type { WebSearchResult } from '../src/types/api.js'
 
 function isWebSearchResult(item: unknown): item is WebSearchResult {
@@ -23,8 +24,11 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(res.body.status, 'healthy')
       assert.equal(typeof res.body.uptimeSeconds, 'number')
       assert.equal(typeof res.body.demoMode, 'boolean')
-      assert.equal(res.body.aiProvider, 'none')
-      assert.equal(res.body.aiConfigured, false)
+      assert.equal(res.body.aiProvider, config.aiProvider)
+      assert.equal(
+        res.body.aiConfigured,
+        config.aiProvider === 'ollama' ? Boolean(config.ollamaModel) : config.aiProvider !== 'none'
+      )
       assert.ok(Array.isArray(res.body.supportedVerticals))
       assert.ok(res.body.supportedVerticals.includes('all'))
       assert.ok(res.body.supportedVerticals.includes('images'))
@@ -879,9 +883,14 @@ describe('Backend Foundation API Tests', () => {
 
       assert.equal(res.status, 200)
       assert.ok(res.body.aiAnswer)
-      assert.equal(res.body.aiAnswer.status, 'unavailable')
-      assert.equal(res.body.aiAnswer.provider, 'none')
+      assert.equal(res.body.aiAnswer.provider, config.aiProvider)
       assert.ok(Array.isArray(res.body.aiAnswer.sources))
+      if (res.body.aiAnswer.status === 'ready') {
+        assert.ok(typeof res.body.aiAnswer.answer === 'string')
+        assert.ok(res.body.aiAnswer.answer.length > 0)
+      } else {
+        assert.ok(res.body.aiAnswer.status === 'unavailable' || res.body.aiAnswer.status === 'unsupported')
+      }
     })
   })
 
@@ -1167,6 +1176,163 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(res.sources[1].domain, 'brave.com')
     })
 
+    it('should not append insufficient-information disclaimer when a valid answer is generated', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content:
+                'Open source software is developed collaboratively and distributed freely [1]. Anyone can inspect, modify, and enhance the code [2].\n\nThe retrieved search results do not contain enough verified information to answer this question.',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+        fetchFn: mockFetch as any,
+      })
+
+      const res = await service.generateAnswer('what is open source', mockSearchResults as any)
+
+      assert.equal(res.status, 'ready')
+      assert.ok(res.answer)
+      assert.ok(res.answer.includes('Open source software is developed collaboratively'))
+      assert.ok(res.answer.includes('[1]'))
+      assert.ok(res.answer.includes('[2]'))
+      assert.ok(
+        !res.answer.includes('do not contain enough verified information'),
+        'Must not append insufficient-information message to valid answer'
+      )
+      assert.equal(res.sources?.length, 2)
+    })
+
+    it('should sanitize out-of-range citations so markers strictly map to candidate sources', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content:
+                'Verified claim from first source [1]. Second claim [2]. Hallucinated citation [9]. Multi citation [1, 5].',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+        fetchFn: mockFetch as any,
+      })
+
+      const res = await service.generateAnswer('privacy query', mockSearchResults as any)
+
+      assert.equal(res.status, 'ready')
+      assert.ok(res.answer)
+      assert.ok(res.answer.includes('[1]'))
+      assert.ok(res.answer.includes('[2]'))
+      assert.ok(!res.answer.includes('[9]'), 'Out-of-range citation [9] must be removed')
+      assert.ok(!res.answer.includes('[1, 5]'), 'Multi citation with out-of-range [5] must keep only valid [1]')
+      assert.ok(res.answer.includes('Multi citation [1].'))
+    })
+
+    it('should return unsupported status when the evidence genuinely fails verification criteria', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content:
+                'The retrieved search results do not contain enough verified information to answer this question.',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+        fetchFn: mockFetch as any,
+      })
+
+      const res = await service.generateAnswer('unanswerable topic', mockSearchResults as any)
+
+      assert.equal(res.status, 'unsupported')
+      assert.equal(res.answer, undefined)
+      assert.ok(res.notice?.includes('do not contain enough verified information'))
+      assert.equal(res.sources?.length, 2)
+    })
+
+    it('should strip unhelpful preamble phrases such as "The retrieved search results provide information..."', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content:
+                'The retrieved search results provide information about open source software. Open source software is source code that anyone can inspect, modify, and enhance [1]. It is developed collaboratively [2].',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+        fetchFn: mockFetch as any,
+      })
+
+      const res = await service.generateAnswer('what is open source', mockSearchResults as any)
+
+      assert.equal(res.status, 'ready')
+      assert.ok(res.answer)
+      assert.ok(res.answer.startsWith('Open source software is source code'))
+      assert.ok(!res.answer.includes('The retrieved search results provide information'))
+      assert.ok(res.answer.includes('[1]'))
+      assert.ok(res.answer.includes('[2]'))
+    })
+
+    it('should deduplicate repeated execution steps and duplicate sentences', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content:
+                '### Installation Steps\n1. Download the installer from the official repository [1].\n2. Run the executable in terminal [2].\n1. Download the installer from the official repository [1].\n2. Run the executable in terminal [2].\n\nOpen source software is free to use [1]. Open source software is free to use [1]. It is maintained by a global community.',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+        fetchFn: mockFetch as any,
+      })
+
+      const res = await service.generateAnswer('how to install open source', mockSearchResults as any)
+
+      assert.equal(res.status, 'ready')
+      assert.ok(res.answer)
+      // Check that step 1 and 2 appear once, not duplicated
+      const matches1 = res.answer.match(/1\. Download the installer/g)
+      const matches2 = res.answer.match(/2\. Run the executable/g)
+      assert.equal(matches1?.length, 1, 'Step 1 must appear only once')
+      assert.equal(matches2?.length, 1, 'Step 2 must appear only once')
+      // Check sentence deduplication
+      const duplicateSentenceCount = res.answer.match(/Open source software is free to use/g)
+      assert.equal(duplicateSentenceCount?.length, 1, 'Duplicate sentence must appear only once')
+    })
+
     it('should treat search snippets as untrusted content and enforce prompt injection defenses', async () => {
       const { AIAnswerService } = await import('../src/services/ai.service.js')
       let userPromptContent = ''
@@ -1221,8 +1387,21 @@ describe('Backend Foundation API Tests', () => {
       const res = await request(app).get('/api/health')
 
       assert.equal(res.status, 200)
-      assert.ok('aiProvider' in res.body)
-      assert.ok('aiConfigured' in res.body)
+      assert.equal(res.body.aiProvider, config.aiProvider)
+      if (config.aiProvider === 'ollama') {
+        assert.equal(res.body.aiConfigured, Boolean(config.ollamaModel))
+        assert.equal(res.body.aiModel, config.ollamaModel || undefined)
+      }
+    })
+
+    it('should load configured Ollama baseUrl and model from backend config', async () => {
+      assert.ok(typeof config.ollamaBaseUrl === 'string')
+      assert.ok(config.ollamaBaseUrl.length > 0)
+      assert.ok(typeof config.ollamaModel === 'string')
+      if (config.aiProvider === 'ollama') {
+        assert.ok(config.ollamaBaseUrl.includes('11434'))
+        assert.equal(config.ollamaModel, 'llama3.2:1b')
+      }
     })
 
     it('should preserve organic search results and answer layer fallback when Ollama fails', async () => {

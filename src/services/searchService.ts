@@ -45,7 +45,7 @@ async function fetchVerticalFromBackend<T>(
 
   try {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 3500)
+    const timeoutId = setTimeout(() => controller.abort(), 20000)
 
     const url = `${API_BASE_URL}/api/search?q=${encodeURIComponent(trimmed)}&v=${encodeURIComponent(vertical)}`
     const response = await fetch(url, {

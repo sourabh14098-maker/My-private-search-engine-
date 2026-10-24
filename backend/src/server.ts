@@ -7,6 +7,8 @@ const server = app.listen(config.port, () => {
   console.log(`[DitchX Backend] Demo mode: ${config.demoMode ? 'ENABLED (prototype data)' : 'DISABLED (real index expected)'}`)
   console.log(`[DitchX Backend] Health endpoint: http://localhost:${config.port}/api/health`)
   console.log(`[DitchX Backend] Search endpoint: http://localhost:${config.port}/api/search?q=privacy&v=all`)
+  console.log(`[DitchX Backend] Search Provider: ${config.searchProvider}`)
+  console.log(`[DitchX Backend] AI Provider: ${config.aiProvider}${config.aiProvider === 'ollama' ? ` (Model: ${config.ollamaModel}, Base URL: ${config.ollamaBaseUrl})` : ''}`)
 })
 
 function shutdown(signal: string) {
@@ -19,3 +21,4 @@ function shutdown(signal: string) {
 
 process.on('SIGINT', () => shutdown('SIGINT'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))
+

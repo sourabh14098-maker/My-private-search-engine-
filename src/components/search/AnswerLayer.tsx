@@ -1,11 +1,175 @@
+import React from 'react'
 import { Sparkles, ExternalLink, ShieldCheck, Info } from 'lucide-react'
-import type { AIAnswerData } from '../../types'
+import type { AIAnswerData, AnswerSource } from '../../types'
 import { sanitizeSafeUrl } from '../../utils/url'
 
 interface AnswerLayerProps {
   query: string
   answer?: AIAnswerData
   loading?: boolean
+}
+
+interface MarkdownBlock {
+  type: 'heading' | 'numbered-list' | 'bullet-list' | 'paragraph'
+  level?: number
+  items?: string[]
+  text?: string
+}
+
+function renderInlineMarkdown(text: string, sources: AnswerSource[]): React.ReactNode[] {
+  // Matches citations [1], bold **text**, code `code`, italics *text*
+  const tokenPattern = /(\[\d+(?:\s*,\s*\d+)*\]|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\n]+\*|_[^_\n]+_)/g
+  const parts = text.split(tokenPattern)
+
+  return parts.map((part, index) => {
+    if (!part) return null
+
+    // Citation marker match: [1] or [1, 2]
+    if (/^\[\d+(?:\s*,\s*\d+)*\]$/.test(part)) {
+      const nums = part
+        .slice(1, -1)
+        .split(',')
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => !isNaN(n))
+
+      return (
+        <span key={`cite-group-${index}`} className="answer-citation-group">
+          {nums.map((num) => {
+            const sourceIndex = num - 1
+            const source = sources[sourceIndex]
+            if (!source) {
+              return (
+                <span key={`cite-invalid-${num}`} className="answer-citation-ref inert">
+                  [{num}]
+                </span>
+              )
+            }
+            const safeUrl = sanitizeSafeUrl(source.destinationUrl || source.url)
+            return (
+              <a
+                key={`cite-${num}-${sourceIndex}`}
+                href={safeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="answer-citation-ref"
+                title={`${source.title || 'Source'} (${source.domain || ''})`}
+                aria-label={`Citation [${num}]: ${source.title || source.domain || 'Source'}`}
+              >
+                [{num}]
+              </a>
+            )
+          })}
+        </span>
+      )
+    }
+
+    // Bold text: **text** or __text__
+    if (
+      (part.startsWith('**') && part.endsWith('**') && part.length >= 4) ||
+      (part.startsWith('__') && part.endsWith('__') && part.length >= 4)
+    ) {
+      return <strong key={`bold-${index}`}>{part.slice(2, -2)}</strong>
+    }
+
+    // Inline code: `code`
+    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+      return (
+        <code key={`code-${index}`} className="answer-inline-code">
+          {part.slice(1, -1)}
+        </code>
+      )
+    }
+
+    // Italics text: *text* or _text_
+    if (
+      (part.startsWith('*') && part.endsWith('*') && part.length >= 2) ||
+      (part.startsWith('_') && part.endsWith('_') && part.length >= 2)
+    ) {
+      return <em key={`em-${index}`}>{part.slice(1, -1)}</em>
+    }
+
+    // Plain text
+    return part
+  })
+}
+
+function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
+  const lines = rawText.split(/\r?\n/)
+  const blocks: MarkdownBlock[] = []
+  let currentBlock: MarkdownBlock | null = null
+
+  const flushBlock = () => {
+    if (currentBlock) {
+      blocks.push(currentBlock)
+      currentBlock = null
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+
+    if (!trimmed) {
+      flushBlock()
+      continue
+    }
+
+    // Headings: ### Heading, ## Heading, # Heading
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
+    if (headingMatch) {
+      flushBlock()
+      blocks.push({
+        type: 'heading',
+        level: headingMatch[1].length,
+        text: headingMatch[2].trim(),
+      })
+      continue
+    }
+
+    // Standalone bold line as section heading: **Heading Text**
+    const boldHeadingMatch = trimmed.match(/^\*\*([^*]+)\*\*$/)
+    if (boldHeadingMatch) {
+      flushBlock()
+      blocks.push({
+        type: 'heading',
+        level: 3,
+        text: boldHeadingMatch[1].trim(),
+      })
+      continue
+    }
+
+    // Numbered list item: 1. Item
+    const numMatch = trimmed.match(/^(\d+)\.\s+(.+)$/)
+    if (numMatch) {
+      if (!currentBlock || currentBlock.type !== 'numbered-list') {
+        flushBlock()
+        currentBlock = { type: 'numbered-list', items: [] }
+      }
+      currentBlock.items?.push(numMatch[2].trim())
+      continue
+    }
+
+    // Bullet list item: - Item, * Item, • Item
+    const bulletMatch = trimmed.match(/^[-*•]\s+(.+)$/)
+    if (bulletMatch) {
+      if (!currentBlock || currentBlock.type !== 'bullet-list') {
+        flushBlock()
+        currentBlock = { type: 'bullet-list', items: [] }
+      }
+      currentBlock.items?.push(bulletMatch[1].trim())
+      continue
+    }
+
+    // Regular paragraph
+    if (!currentBlock || currentBlock.type !== 'paragraph') {
+      flushBlock()
+      currentBlock = { type: 'paragraph', text: trimmed }
+    } else {
+      currentBlock.text += ' ' + trimmed
+    }
+  }
+
+  flushBlock()
+  return blocks
 }
 
 export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps) {
@@ -79,21 +243,39 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
       {status === 'ready' && answer?.answer && (
         <div className="answer-layer-content">
           <div className="answer-markdown-text">
-            {answer.answer.split('\n\n').map((paragraph, idx) => {
-              const trimmed = paragraph.trim()
-              if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-                const items = trimmed.split('\n').map((li) => li.replace(/^[-*]\s+/, '').trim())
+            {parseMarkdownBlocks(answer.answer).map((block, idx) => {
+              if (block.type === 'heading') {
+                return (
+                  <h3 key={`h-${idx}`} className="answer-heading">
+                    {renderInlineMarkdown(block.text || '', sources)}
+                  </h3>
+                )
+              }
+              if (block.type === 'numbered-list' && block.items) {
+                return (
+                  <ol key={`ol-${idx}`} className="answer-numbered-list">
+                    {block.items.map((item, itemIdx) => (
+                      <li key={`li-num-${itemIdx}`}>
+                        {renderInlineMarkdown(item, sources)}
+                      </li>
+                    ))}
+                  </ol>
+                )
+              }
+              if (block.type === 'bullet-list' && block.items) {
                 return (
                   <ul key={`ul-${idx}`} className="answer-bullet-list">
-                    {items.map((item, itemIdx) => (
-                      <li key={`li-${itemIdx}`}>{item}</li>
+                    {block.items.map((item, itemIdx) => (
+                      <li key={`li-bullet-${itemIdx}`}>
+                        {renderInlineMarkdown(item, sources)}
+                      </li>
                     ))}
                   </ul>
                 )
               }
               return (
                 <p key={`p-${idx}`} className="answer-paragraph">
-                  {trimmed}
+                  {renderInlineMarkdown(block.text || '', sources)}
                 </p>
               )
             })}
