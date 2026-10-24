@@ -2,6 +2,17 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import request from 'supertest'
 import { app } from '../src/app.js'
+import type { WebSearchResult } from '../src/types/api.js'
+
+function isWebSearchResult(item: unknown): item is WebSearchResult {
+  return typeof item === 'object' && item !== null && 'title' in item
+}
+
+function assertIsWebSearchResult(item: unknown): asserts item is WebSearchResult {
+  if (!isWebSearchResult(item)) {
+    assert.fail('Expected item to be a WebSearchResult')
+  }
+}
 
 describe('Backend Foundation API Tests', () => {
   describe('GET /api/health', () => {
@@ -601,7 +612,7 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(res.provider, 'mock-index')
       assert.equal(res.isDemo, true)
       assert.equal(res.metadata.isIndexedData, false)
-      assert.ok(res.results.every((r) => r.isDemo === true))
+      assert.ok(res.results.every((r) => isWebSearchResult(r) && r.isDemo === true))
     })
 
     it('should route to SearxngSearchProvider when provider is searxng', async () => {
@@ -634,7 +645,9 @@ describe('Backend Foundation API Tests', () => {
         assert.equal(res.isDemo, false)
         assert.equal(res.metadata.isIndexedData, true)
         assert.equal(res.results.length, 1)
-        assert.equal(res.results[0].title, 'SearXNG Mock Test')
+        const firstResult = res.results[0]
+        assertIsWebSearchResult(firstResult)
+        assert.equal(firstResult.title, 'SearXNG Mock Test')
       } finally {
         globalThis.fetch = originalFetch
       }
@@ -814,11 +827,13 @@ describe('Backend Foundation API Tests', () => {
 
       assert.equal(answer.status, 'unavailable')
       assert.equal(answer.provider, 'none')
-      assert.ok(answer.notice.includes('To preserve privacy, DitchX does not transmit search queries'))
-      assert.equal(answer.sources.length, 2)
-      assert.equal(answer.sources[0].title, 'Linux Kernel Archives')
-      assert.equal(answer.sources[0].url, 'https://kernel.org')
-      assert.equal(answer.sources[0].domain, 'kernel.org')
+      assert.ok(answer.notice?.includes('To preserve privacy, DitchX does not transmit search queries'))
+      const sources = answer.sources
+      assert.ok(sources)
+      assert.equal(sources.length, 2)
+      assert.equal(sources[0].title, 'Linux Kernel Archives')
+      assert.equal(sources[0].url, 'https://kernel.org')
+      assert.equal(sources[0].domain, 'kernel.org')
     })
 
     it('should return unsupported status when query has no supporting results', async () => {
@@ -828,8 +843,10 @@ describe('Backend Foundation API Tests', () => {
       const answer = await service.generateAnswer('nonexistentquery12345', [])
 
       assert.equal(answer.status, 'unsupported')
-      assert.ok(answer.notice.includes('do not contain enough verified information'))
-      assert.equal(answer.sources.length, 0)
+      assert.ok(answer.notice?.includes('do not contain enough verified information'))
+      const sources = answer.sources
+      assert.ok(sources)
+      assert.equal(sources.length, 0)
     })
 
     it('should extract source citations with clean titles and destination URLs', async () => {
@@ -1221,9 +1238,49 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(answer.status, 'unavailable')
       assert.equal(answer.sources?.length, 2)
       assert.ok(answer.notice?.includes('unreachable'))
-      // Verify candidate organic results were preserved for the UI
       assert.equal(mockSearchResults.length, 2)
       assert.equal(mockSearchResults[0].url, 'https://duckduckgo.com')
+    })
+
+    it('should preserve organic search results in SearxngSearchProvider if aiAnswerService throws unexpectedly', async () => {
+      const { SearxngSearchProvider } = await import('../src/services/providers/searxng.provider.js')
+      const { aiAnswerService } = await import('../src/services/ai.service.js')
+      const provider = new SearxngSearchProvider('http://localhost:8888', 5000)
+
+      const originalFetch = globalThis.fetch
+      const originalGenerate = aiAnswerService.generateAnswer
+      try {
+        globalThis.fetch = async () =>
+          new Response(
+            JSON.stringify({
+              query: 'privacy',
+              number_of_results: 1,
+              results: [
+                {
+                  title: 'SearXNG Preservation Test',
+                  url: 'https://example.com/preserve',
+                  content: 'Test content for preservation',
+                },
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+
+        aiAnswerService.generateAnswer = async () => {
+          throw new Error('Fatal AI inference crash')
+        }
+
+        const res = await provider.search('privacy')
+        assert.equal(res.provider, 'searxng')
+        assert.equal(res.isDemo, false)
+        assert.equal(res.results.length, 1)
+        assert.equal(res.results[0].title, 'SearXNG Preservation Test')
+        assert.equal(res.aiAnswer?.status, 'unavailable')
+        assert.ok(res.aiAnswer?.notice?.includes('temporarily unavailable'))
+      } finally {
+        globalThis.fetch = originalFetch
+        aiAnswerService.generateAnswer = originalGenerate
+      }
     })
   })
 })

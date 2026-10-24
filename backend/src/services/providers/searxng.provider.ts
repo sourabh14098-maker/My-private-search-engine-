@@ -5,6 +5,7 @@ import type {
   WebSearchResult,
   SearchVertical,
   QuickContextData,
+  AIAnswerData,
 } from '../../types/api.js'
 import { aiAnswerService } from '../ai.service.js'
 
@@ -241,7 +242,17 @@ export class SearxngSearchProvider {
       ? (rawData.infoboxes[0] as SearxngInfoboxItem)
       : undefined
     const quickContext = normalizeSearxngInfobox(rawInfobox)
-    const aiAnswer = await aiAnswerService.generateAnswer(query, webResults, quickContext)
+    let aiAnswer: AIAnswerData | undefined
+    try {
+      aiAnswer = await aiAnswerService.generateAnswer(query, webResults, quickContext)
+    } catch {
+      aiAnswer = {
+        status: 'unavailable',
+        provider: config.aiProvider,
+        notice: 'AI Answer Layer is temporarily unavailable. Organic search results are displayed below.',
+        sources: aiAnswerService.extractSourceCitations(webResults).slice(0, 5),
+      }
+    }
     const executionTimeMs = Date.now() - startTime
 
     const relatedSearches =
