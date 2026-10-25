@@ -137,6 +137,8 @@ export interface QuickContextData {
   attributes?: { label: string; value: string }[]
 }
 
+export type LanguageStyle = 'english' | 'hindi' | 'hinglish'
+
 export interface AIAnswerData {
   status: 'ready' | 'unavailable' | 'unsupported' | 'error'
   answer?: string
@@ -144,6 +146,7 @@ export interface AIAnswerData {
   model?: string
   notice?: string
   sources?: AnswerSource[]
+  languageStyle?: LanguageStyle
 }
 
 export interface SearchResponseMetadata {

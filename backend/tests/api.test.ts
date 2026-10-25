@@ -1462,6 +1462,105 @@ describe('Backend Foundation API Tests', () => {
       }
     })
   })
+
+  describe('DitchX AI Answer Upgrades — Language, Markdown & Quality Tests', () => {
+    it('should detect English queries correctly', async () => {
+      const { detectQueryLanguageStyle } = await import('../src/services/ai.service.js')
+      assert.equal(detectQueryLanguageStyle('What is Java?'), 'english')
+      assert.equal(detectQueryLanguageStyle('Explain Java inheritance with code'), 'english')
+      assert.equal(detectQueryLanguageStyle('How to build a web app with React'), 'english')
+      assert.equal(detectQueryLanguageStyle('Help me with Java'), 'english')
+    })
+
+    it('should detect Hindi queries in Devanagari script correctly', async () => {
+      const { detectQueryLanguageStyle } = await import('../src/services/ai.service.js')
+      assert.equal(detectQueryLanguageStyle('Java क्या है?'), 'hindi')
+      assert.equal(detectQueryLanguageStyle('पायथन क्या है?'), 'hindi')
+      assert.equal(detectQueryLanguageStyle('कंप्यूटर कैसे काम करता है'), 'hindi')
+      assert.equal(detectQueryLanguageStyle('डेटा स्ट्रक्चर के बारे में बताओ'), 'hindi')
+    })
+
+    it('should detect Hinglish queries in Roman script correctly', async () => {
+      const { detectQueryLanguageStyle } = await import('../src/services/ai.service.js')
+      assert.equal(detectQueryLanguageStyle('Java kya hai?'), 'hinglish')
+      assert.equal(detectQueryLanguageStyle('Bhai Java mein inheritance samjha'), 'hinglish')
+      assert.equal(detectQueryLanguageStyle('Python me loop kaise use kare'), 'hinglish')
+      assert.equal(detectQueryLanguageStyle('React aur Vue mein kya difference hai'), 'hinglish')
+      assert.equal(detectQueryLanguageStyle('Ye code kaise chalega bhai batao'), 'hinglish')
+    })
+
+    it('should clean raw markdown artifacts such as leading orphaned ** and === underlines', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      // Case 1: standalone ** line followed by === underline
+      const rawWithDivider = '**\n=======================\n\nOpen source refers to software with accessible code. [1]'
+      const cleaned1 = service.stripPreamble(rawWithDivider)
+      assert.ok(!cleaned1.startsWith('**'))
+      assert.ok(!cleaned1.startsWith('='))
+      assert.ok(cleaned1.includes('Open source refers to software'))
+
+      // Case 2: leading orphaned ** followed by space without closing **
+      const rawOrphanStars = '** Java is a high-level programming language [1].'
+      const cleaned2 = service.stripPreamble(rawOrphanStars)
+      assert.equal(cleaned2, 'Java is a high-level programming language [1].')
+
+      // Case 3: valid bold text is preserved
+      const rawValidBold = '**Java** is a high-level programming language [1].'
+      const cleaned3 = service.stripPreamble(rawValidBold)
+      assert.equal(cleaned3, '**Java** is a high-level programming language [1].')
+
+      // Case 4: valid bold label is preserved
+      const rawBoldLabel = '**Java:** A high-level programming language [1].'
+      const cleaned4 = service.stripPreamble(rawBoldLabel)
+      assert.equal(cleaned4, '**Java:** A high-level programming language [1].')
+    })
+
+    it('should pass correct languageStyle to synthesized answers and include language instructions in prompt', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      let capturedBody: any = null
+
+      const mockFetch = async (_url: string, init?: RequestInit) => {
+        if (init?.body) {
+          capturedBody = JSON.parse(init.body as string)
+        }
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: 'Java ek versatile language hai [1].',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+        fetchFn: mockFetch as any,
+      })
+
+      const sources = [
+        {
+          title: 'Java Overview',
+          url: 'https://example.com/java',
+          destinationUrl: 'https://example.com/java',
+          domain: 'example.com',
+          snippet: 'Java is an OOP language.',
+        },
+      ]
+
+      const res = await service.generateAnswer('Java kya hai?', sources as any)
+      assert.equal(res.status, 'ready')
+      assert.equal(res.languageStyle, 'hinglish')
+      assert.ok(capturedBody)
+      const systemMsg = capturedBody.messages.find((m: any) => m.role === 'system')?.content || ''
+      assert.ok(systemMsg.includes('LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT)'))
+    })
+  })
 })
 
 

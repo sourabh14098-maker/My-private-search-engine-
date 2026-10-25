@@ -1,7 +1,17 @@
-import React from 'react'
-import { Sparkles, ExternalLink, ShieldCheck, Info } from 'lucide-react'
-import type { AIAnswerData, AnswerSource } from '../../types'
+import { useState, useLayoutEffect, useRef } from 'react'
+import {
+  Sparkles,
+  ExternalLink,
+  ShieldCheck,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Check,
+} from 'lucide-react'
+import type { AIAnswerData } from '../../types'
 import { sanitizeSafeUrl } from '../../utils/url'
+import { parseMarkdownBlocks, renderInlineMarkdown } from '../../utils/markdownParser'
 
 interface AnswerLayerProps {
   query: string
@@ -9,170 +19,86 @@ interface AnswerLayerProps {
   loading?: boolean
 }
 
-interface MarkdownBlock {
-  type: 'heading' | 'numbered-list' | 'bullet-list' | 'paragraph'
-  level?: number
-  items?: string[]
-  text?: string
-}
+/**
+ * Fenced code block component with syntax language badge and one-click copy feedback.
+ */
+function CodeBlock({ code, language }: { code: string; language?: string }) {
+  const [copied, setCopied] = useState(false)
 
-function renderInlineMarkdown(text: string, sources: AnswerSource[]): React.ReactNode[] {
-  // Matches citations [1], bold **text**, code `code`, italics *text*
-  const tokenPattern = /(\[\d+(?:\s*,\s*\d+)*\]|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\n]+\*|_[^_\n]+_)/g
-  const parts = text.split(tokenPattern)
-
-  return parts.map((part, index) => {
-    if (!part) return null
-
-    // Citation marker match: [1] or [1, 2]
-    if (/^\[\d+(?:\s*,\s*\d+)*\]$/.test(part)) {
-      const nums = part
-        .slice(1, -1)
-        .split(',')
-        .map((s) => parseInt(s.trim(), 10))
-        .filter((n) => !isNaN(n))
-
-      return (
-        <span key={`cite-group-${index}`} className="answer-citation-group">
-          {nums.map((num) => {
-            const sourceIndex = num - 1
-            const source = sources[sourceIndex]
-            if (!source) {
-              return (
-                <span key={`cite-invalid-${num}`} className="answer-citation-ref inert">
-                  [{num}]
-                </span>
-              )
-            }
-            const safeUrl = sanitizeSafeUrl(source.destinationUrl || source.url)
-            return (
-              <a
-                key={`cite-${num}-${sourceIndex}`}
-                href={safeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="answer-citation-ref"
-                title={`${source.title || 'Source'} (${source.domain || ''})`}
-                aria-label={`Citation [${num}]: ${source.title || source.domain || 'Source'}`}
-              >
-                [{num}]
-              </a>
-            )
-          })}
-        </span>
-      )
-    }
-
-    // Bold text: **text** or __text__
-    if (
-      (part.startsWith('**') && part.endsWith('**') && part.length >= 4) ||
-      (part.startsWith('__') && part.endsWith('__') && part.length >= 4)
-    ) {
-      return <strong key={`bold-${index}`}>{part.slice(2, -2)}</strong>
-    }
-
-    // Inline code: `code`
-    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
-      return (
-        <code key={`code-${index}`} className="answer-inline-code">
-          {part.slice(1, -1)}
-        </code>
-      )
-    }
-
-    // Italics text: *text* or _text_
-    if (
-      (part.startsWith('*') && part.endsWith('*') && part.length >= 2) ||
-      (part.startsWith('_') && part.endsWith('_') && part.length >= 2)
-    ) {
-      return <em key={`em-${index}`}>{part.slice(1, -1)}</em>
-    }
-
-    // Plain text
-    return part
-  })
-}
-
-function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
-  const lines = rawText.split(/\r?\n/)
-  const blocks: MarkdownBlock[] = []
-  let currentBlock: MarkdownBlock | null = null
-
-  const flushBlock = () => {
-    if (currentBlock) {
-      blocks.push(currentBlock)
-      currentBlock = null
+  const handleCopy = async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(code)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }
+    } catch {
+      // Fallback if clipboard API is restricted
     }
   }
 
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim()
-
-    if (!trimmed) {
-      flushBlock()
-      continue
-    }
-
-    // Headings: ### Heading, ## Heading, # Heading
-    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
-    if (headingMatch) {
-      flushBlock()
-      blocks.push({
-        type: 'heading',
-        level: headingMatch[1].length,
-        text: headingMatch[2].trim(),
-      })
-      continue
-    }
-
-    // Standalone bold line as section heading: **Heading Text**
-    const boldHeadingMatch = trimmed.match(/^\*\*([^*]+)\*\*$/)
-    if (boldHeadingMatch) {
-      flushBlock()
-      blocks.push({
-        type: 'heading',
-        level: 3,
-        text: boldHeadingMatch[1].trim(),
-      })
-      continue
-    }
-
-    // Numbered list item: 1. Item
-    const numMatch = trimmed.match(/^(\d+)\.\s+(.+)$/)
-    if (numMatch) {
-      if (!currentBlock || currentBlock.type !== 'numbered-list') {
-        flushBlock()
-        currentBlock = { type: 'numbered-list', items: [] }
-      }
-      currentBlock.items?.push(numMatch[2].trim())
-      continue
-    }
-
-    // Bullet list item: - Item, * Item, • Item
-    const bulletMatch = trimmed.match(/^[-*•]\s+(.+)$/)
-    if (bulletMatch) {
-      if (!currentBlock || currentBlock.type !== 'bullet-list') {
-        flushBlock()
-        currentBlock = { type: 'bullet-list', items: [] }
-      }
-      currentBlock.items?.push(bulletMatch[1].trim())
-      continue
-    }
-
-    // Regular paragraph
-    if (!currentBlock || currentBlock.type !== 'paragraph') {
-      flushBlock()
-      currentBlock = { type: 'paragraph', text: trimmed }
-    } else {
-      currentBlock.text += ' ' + trimmed
-    }
-  }
-
-  flushBlock()
-  return blocks
+  return (
+    <div className="answer-code-block-wrapper">
+      <div className="answer-code-header">
+        <span className="answer-code-lang">{language || 'code'}</span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="answer-code-copy-btn"
+          aria-label={copied ? 'Code copied to clipboard' : 'Copy code to clipboard'}
+        >
+          {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+          <span>{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+      <pre className="answer-code-content">
+        <code>{code}</code>
+      </pre>
+    </div>
+  )
 }
+
+const COLLAPSED_HEIGHT_PX = 160
 
 export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps) {
+  const [expandedAnswer, setExpandedAnswer] = useState<string | null>(null)
+  const isExpanded = Boolean(answer?.answer && expandedAnswer === answer.answer)
+
+  const [isTruncated, setIsTruncated] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  const handleToggleExpand = () => {
+    setExpandedAnswer(isExpanded ? null : (answer?.answer || ''))
+  }
+
+  // Measure content overflow dynamically using ResizeObserver
+  useLayoutEffect(() => {
+    const el = contentRef.current
+    if (!el) {
+      setIsTruncated(false)
+      return
+    }
+
+    const checkTruncation = () => {
+      // If content scrollHeight exceeds collapsed threshold by at least 24px (~1 line of text)
+      const hasOverflow = el.scrollHeight > COLLAPSED_HEIGHT_PX + 24
+      setIsTruncated(hasOverflow)
+    }
+
+    checkTruncation()
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        checkTruncation()
+      })
+      observer.observe(el)
+
+      return () => {
+        observer.disconnect()
+      }
+    }
+  }, [answer?.answer])
+
   if (loading) {
     return (
       <section className="answer-layer loading" aria-busy="true" aria-label="Synthesizing answer">
@@ -242,13 +168,30 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
 
       {status === 'ready' && answer?.answer && (
         <div className="answer-layer-content">
-          <div className="answer-markdown-text">
+          <div
+            id="ditchx-answer-body"
+            ref={contentRef}
+            className={`answer-markdown-text ${isTruncated && !isExpanded ? 'collapsed' : 'expanded'}`}
+            style={{
+              maxHeight: isTruncated && !isExpanded ? `${COLLAPSED_HEIGHT_PX}px` : undefined,
+            }}
+          >
             {parseMarkdownBlocks(answer.answer).map((block, idx) => {
               if (block.type === 'heading') {
+                const HeadingTag = block.level === 2 ? 'h2' : block.level === 4 ? 'h4' : 'h3'
                 return (
-                  <h3 key={`h-${idx}`} className="answer-heading">
+                  <HeadingTag key={`h-${idx}`} className="answer-heading">
                     {renderInlineMarkdown(block.text || '', sources)}
-                  </h3>
+                  </HeadingTag>
+                )
+              }
+              if (block.type === 'code-block') {
+                return (
+                  <CodeBlock
+                    key={`code-block-${idx}`}
+                    code={block.code || ''}
+                    language={block.language}
+                  />
                 )
               }
               if (block.type === 'numbered-list' && block.items) {
@@ -279,7 +222,30 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
                 </p>
               )
             })}
+            {isTruncated && !isExpanded && (
+              <div className="answer-bottom-fade" aria-hidden="true" />
+            )}
           </div>
+
+          {isTruncated && (
+            <div className="answer-expand-container">
+              <button
+                type="button"
+                id="ditchx-answer-toggle-btn"
+                className="answer-toggle-btn"
+                onClick={handleToggleExpand}
+                aria-expanded={isExpanded}
+                aria-controls="ditchx-answer-body"
+              >
+                <span>{isExpanded ? 'Show less' : 'Show more'}</span>
+                {isExpanded ? (
+                  <ChevronUp size={14} className="answer-toggle-icon" aria-hidden="true" />
+                ) : (
+                  <ChevronDown size={14} className="answer-toggle-icon" aria-hidden="true" />
+                )}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -315,7 +281,7 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
         </div>
       )}
 
-      {/* Clickable Source Citations */}
+      {/* Clickable Source Citations (always accessible outside collapsible preview) */}
       {sources.length > 0 && (
         <div className="answer-layer-sources" aria-label="Retrieved sources for answer synthesis">
           <span className="sources-heading">

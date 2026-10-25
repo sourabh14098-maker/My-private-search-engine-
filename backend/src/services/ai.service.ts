@@ -1,5 +1,5 @@
 import { config, type AIProviderType } from '../config.js'
-import type { AIAnswerData, AnswerSource, WebSearchResult, QuickContextData } from '../types/api.js'
+import type { AIAnswerData, AnswerSource, WebSearchResult, QuickContextData, LanguageStyle } from '../types/api.js'
 
 export interface OllamaServiceOptions {
   baseUrl?: string
@@ -15,6 +15,95 @@ export interface IAIAnswerService {
     quickContext?: QuickContextData,
     forcedProvider?: AIProviderType
   ): Promise<AIAnswerData>
+}
+
+/**
+ * Detects the query language and style:
+ * 1. 'hindi': Contains Devanagari script (e.g. "Java क्या है?")
+ * 2. 'hinglish': Written in Roman/Latin script using Hindi vocabulary/grammar (e.g. "Java kya hai?", "Bhai samjha")
+ * 3. 'english': Standard English query (e.g. "What is Java?", "Explain Java inheritance with code")
+ */
+export function detectQueryLanguageStyle(query: string): LanguageStyle {
+  if (!query || typeof query !== 'string') return 'english'
+  const trimmed = query.trim()
+  if (!trimmed) return 'english'
+
+  // 1. Devanagari script detection (Hindi)
+  // Unicode range \u0900-\u097F contains Devanagari characters
+  const devanagariMatches = trimmed.match(/[\u0900-\u097F]/g)
+  if (devanagariMatches && devanagariMatches.length >= 1) {
+    return 'hindi'
+  }
+
+  // 2. Hinglish detection (Hindi written in Roman/Latin script)
+  const normalized = trimmed.toLowerCase()
+  const words = normalized
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+
+  if (words.length === 0) return 'english'
+
+  // Distinctive, unambiguous Hinglish words
+  const strongHinglishWords = new Set([
+    'kya', 'kyun', 'kyu', 'kaise', 'kaisa', 'kaisi', 'kab', 'kahan', 'kaha',
+    'kaun', 'kitna', 'kitne', 'kitni', 'kisko', 'kisse', 'kiska',
+    'samjha', 'samjhao', 'samajh', 'samjhana',
+    'batao', 'batana', 'bata', 'bolo', 'bol',
+    'sikhao', 'seekho', 'padho',
+    'bhai', 'yaar', 'dost',
+    'karna', 'karo', 'kare', 'karein', 'karta', 'karti', 'karte',
+    'chahiye', 'sakta', 'sakti', 'sakte',
+    'hota', 'hoti', 'hote',
+    'accha', 'achha', 'theek', 'thik',
+    'zyada', 'jyada', 'bahut', 'bohot', 'thoda', 'thodi',
+    'mera', 'meri', 'mere', 'tera', 'teri', 'tere', 'apna', 'apne', 'apni',
+    'tumhara', 'tumhari', 'hamara', 'hamari', 'aapka', 'aapki',
+    'mujhe', 'tujhe', 'isse', 'usse', 'isko', 'usko',
+    'nahi', 'nahin', 'mat',
+    'aise', 'waise', 'kuch', 'wala', 'wali', 'wale',
+    'milega', 'milta', 'milti'
+  ])
+
+  // Contextual Hindi words that might collide with English or short abbreviations
+  const contextualHinglishWords = new Set([
+    'hai', 'hain', 'ho', 'hoon', 'hun',
+    'tha', 'thi', 'the', 'hoga', 'hogi', 'hoge',
+    'mein', 'me', 'ko', 'se', 'par', 'pe', 'aur', 'bhi', 'toh', 'to', 'ya', 'na',
+    'ye', 'yeh', 'wo', 'woh', 'hum', 'tum', 'aap', 'kar', 'raha', 'rahi', 'rahe'
+  ])
+
+  let strongCount = 0
+  let contextualCount = 0
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]
+    if (strongHinglishWords.has(w)) {
+      strongCount++
+    } else if (contextualHinglishWords.has(w)) {
+      // Disambiguate short words like 'me' and 'to' which are also common English words
+      if (w === 'me' || w === 'to') {
+        const prev = i > 0 ? words[i - 1] : ''
+        const next = i < words.length - 1 ? words[i + 1] : ''
+        if (
+          strongHinglishWords.has(prev) ||
+          strongHinglishWords.has(next) ||
+          contextualHinglishWords.has(prev) ||
+          contextualHinglishWords.has(next)
+        ) {
+          contextualCount++
+        }
+      } else {
+        contextualCount++
+      }
+    }
+  }
+
+  if (strongCount >= 1 || (contextualCount >= 2 && words.length <= 6) || (strongCount + contextualCount >= 2)) {
+    return 'hinglish'
+  }
+
+  return 'english'
 }
 
 export class AIAnswerService implements IAIAnswerService {
@@ -127,6 +216,41 @@ export class AIAnswerService implements IAIAnswerService {
       contextSection = `\n\n[Quick Context Facts: ${cleanContextTitle}]\n${cleanContextBody}`
     }
 
+    const detectedStyle = detectQueryLanguageStyle(query)
+
+    let languageRule: string
+    let languagePromptSuffix: string
+
+    if (detectedStyle === 'hindi') {
+      languageRule = [
+        '11. LANGUAGE REQUIREMENT (HINDI - DEVANAGARI):',
+        '    - The user query is in Hindi (Devanagari script).',
+        '    - Synthesize the entire response in fluent, natural Hindi using Devanagari script (देवनागरी लिपि).',
+        '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords (e.g. `class`, `function`), API names, method names, variables, commands, filenames, and URLs strictly in their original English/Latin characters.',
+        '    - Keep headings, explanations, and conclusions consistently in Devanagari Hindi. Do NOT switch back to English midway.',
+        '    - Do NOT translate external source titles, domain names, or URLs.',
+      ].join('\n')
+      languagePromptSuffix = 'in natural Hindi (Devanagari script) with technical terms and code in original English'
+    } else if (detectedStyle === 'hinglish') {
+      languageRule = [
+        '11. LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT):',
+        '    - The user query is in Hinglish (Hindi written using the English/Latin alphabet, e.g. "Java kya hai?", "Bhai samjha").',
+        '    - Synthesize the entire response in friendly, natural Hinglish using the English/Latin alphabet (e.g. "Java ek popular object-oriented programming language hai...").',
+        '    - SCRIPT RULE: Do NOT use Devanagari script. Use Roman/Latin script for the entire response.',
+        '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords, API names, method names, variables, commands, filenames, and URLs in standard technical English.',
+        '    - Maintain natural Hinglish consistently across all headings, explanations, and bullet points. Do NOT switch midway.',
+        '    - Do NOT translate external source titles, domain names, or URLs.',
+      ].join('\n')
+      languagePromptSuffix = 'in natural Hinglish (Roman/Latin script) with technical terms and code in standard English'
+    } else {
+      languageRule = [
+        '11. LANGUAGE REQUIREMENT (ENGLISH):',
+        '    - The user query is in English. Synthesize the answer in clear, natural English.',
+        '    - Retain all technical identifiers, code, and source references accurately.',
+      ].join('\n')
+      languagePromptSuffix = 'in clear English'
+    }
+
     const systemPrompt = [
       'You are DitchX Search Synthesizer, an AI assistant dedicated to factual, concise answer synthesis for a privacy-first search engine.',
       'Your task is to synthesize a direct, concise answer (1-3 brief paragraphs or bullet points) answering the user query based ONLY on the provided search results.',
@@ -141,7 +265,9 @@ export class AIAnswerService implements IAIAnswerService {
       '7. Output plain text or markdown bullets only. Do not output raw HTML tags or contradictory disclaimers.',
       '8. DIRECT ANSWER: Never begin with conversational filler, meta-announcements, or preamble such as "The retrieved search results provide information...", "Based on the search results...", "According to the snippets...", or "Here is what I found...". Jump straight into the factual answer.',
       '9. NO DUPLICATION: Do not repeat explanations, definitions, execution steps, or sentences. State each verified fact once clearly.',
-      '10. FORMATTING: Structure complex answers with clean Markdown using headings (###), numbered steps (1. ), bullet points (- ), and bold text (**key terms**) where appropriate.',
+      '10. FORMATTING: Structure complex answers with clean Markdown using headings (###), numbered steps (1. ), bullet points (- ), bold text (**key terms**), and fenced code blocks for programming questions. Never output orphaned markdown lines like "**" alone or "===" lines.',
+      '',
+      languageRule,
     ].join('\n')
 
     const userPrompt = [
@@ -151,7 +277,7 @@ export class AIAnswerService implements IAIAnswerService {
       sanitizedSnippets + contextSection,
       '</untrusted_search_results>',
       '',
-      'Synthesize a direct, factual answer without preamble, filler, or duplicate statements. Use [1], [2] citations and clean Markdown (headings, lists, bold text):',
+      `Synthesize a direct, factual answer without preamble, filler, or duplicate statements. Use [1], [2] citations, clean Markdown (headings, lists, bold text, code blocks), and respond ${languagePromptSuffix}:`,
     ].join('\n')
 
     const controller = new AbortController()
@@ -246,7 +372,7 @@ export class AIAnswerService implements IAIAnswerService {
         }
       }
 
-      return this.evaluateAndFormatAnswer(answerText, sources)
+      return this.evaluateAndFormatAnswer(answerText, sources, detectedStyle)
     } catch (err: unknown) {
       clearTimeout(timeoutId)
       const errorObj = err as { name?: string; message?: string }
@@ -278,7 +404,7 @@ export class AIAnswerService implements IAIAnswerService {
    * 3. If a valid answer exists, strips any incorrectly appended trailing disclaimer -> returns 'ready'.
    * 4. If the resulting cleaned answer is empty or lacks substantive content -> returns 'unsupported'.
    */
-  evaluateAndFormatAnswer(rawAnswer: string, sources: AnswerSource[]): AIAnswerData {
+  evaluateAndFormatAnswer(rawAnswer: string, sources: AnswerSource[], languageStyle?: LanguageStyle): AIAnswerData {
     const trimmed = (rawAnswer || '').trim()
 
     if (!trimmed) {
@@ -321,7 +447,7 @@ export class AIAnswerService implements IAIAnswerService {
       cleanText = cleanText.replace(trailingDisclaimerRegex, '').trim()
     }
 
-    // Strip unhelpful preamble phrases (e.g. "The retrieved search results provide information...")
+    // Strip unhelpful preamble phrases and leading raw markdown markers
     cleanText = this.stripPreamble(cleanText)
 
     // Deduplicate repeated execution steps, bullets, or sentences
@@ -347,12 +473,14 @@ export class AIAnswerService implements IAIAnswerService {
       model: this.ollamaModel,
       answer: cleanText,
       sources,
+      languageStyle,
     }
   }
 
   /**
    * Strips conversational filler, meta-announcements, and unhelpful preamble
    * such as "The retrieved search results provide information about..." or "Based on the search results...".
+   * Also strips leading orphan markdown artifacts such as raw "**", "###", "===", or "---".
    */
   stripPreamble(text: string): string {
     const preamblePatterns = [
@@ -363,11 +491,45 @@ export class AIAnswerService implements IAIAnswerService {
 
     let cleaned = text.trim()
 
-    // Strip empty leading markdown tags on their own line (e.g. "**\n" or "###\n")
-    cleaned = cleaned.replace(/^\s*(?:\*{2,}|#{1,6})\s*[\r\n]+/i, '').trim()
+    // Repeatedly clean leading standalone markdown artifact lines and preamble phrases
+    let changed = true
+    while (changed) {
+      const prev = cleaned
+      // Standalone markdown marker lines or divider lines at the start (e.g. "**", "***", "###", "====", "----")
+      cleaned = cleaned.replace(/^\s*(?:\*{1,}|#{1,6}|={3,}|-{3,})\s*(?:[\r\n]+|$)/, '').trim()
+      // Known preamble introductory phrases
+      for (const pattern of preamblePatterns) {
+        cleaned = cleaned.replace(pattern, '').trim()
+      }
+      changed = prev !== cleaned
+    }
 
-    for (const pattern of preamblePatterns) {
-      cleaned = cleaned.replace(pattern, '').trim()
+    // Fix leading raw asterisks that leak at the start of a sentence:
+    // Case 1: Starts with "** " (asterisks followed by whitespace, e.g. "** Java is...")
+    const lines = cleaned.split(/\r?\n/)
+    if (lines.length > 0) {
+      const firstLine = lines[0]
+      if (/^\*\*\s+/.test(firstLine)) {
+        const withoutLeadingStars = firstLine.replace(/^\*\*\s+/, '')
+        // If the rest of the line has no matching "**", remove the orphaned "** "
+        if (!withoutLeadingStars.includes('**')) {
+          lines[0] = withoutLeadingStars
+          cleaned = lines.join('\n')
+        }
+      } else if (firstLine.startsWith('**') && !firstLine.slice(2).includes('**')) {
+        // Case 2: Starts with "**Word..." without closing "**" on that line
+        const colonIdx = firstLine.indexOf(':')
+        if (colonIdx > 2 && colonIdx < 35) {
+          // e.g. "**Java: is a..." -> "**Java:** is a..."
+          const term = firstLine.slice(2, colonIdx).trim()
+          lines[0] = `**${term}:**` + firstLine.slice(colonIdx + 1)
+          cleaned = lines.join('\n')
+        } else {
+          // Remove unclosed leading "**"
+          lines[0] = firstLine.slice(2).trimStart()
+          cleaned = lines.join('\n')
+        }
+      }
     }
 
     if (cleaned.length > 0 && /^[a-z]/.test(cleaned)) {
