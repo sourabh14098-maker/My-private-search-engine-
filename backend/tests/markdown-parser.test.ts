@@ -54,6 +54,38 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       assert.ok(cleaned.startsWith('## Core Features'))
       assert.ok(!cleaned.includes('====='))
     })
+
+    it('should remove internal metadata markers ([#operation], [#result]) while preserving [#1] normalized to [1]', () => {
+      const input = 'Java is object-oriented [#1] [#operation] and fast [#2] [#result: verified].'
+      const cleaned = cleanRawMarkdown(input)
+      assert.ok(!cleaned.includes('[#operation]'))
+      assert.ok(!cleaned.includes('[#result'))
+      assert.ok(cleaned.includes('[1]'))
+      assert.ok(cleaned.includes('[2]'))
+      assert.equal(cleaned, 'Java is object-oriented [1] and fast [2].')
+    })
+
+    it('should strip conversational sign-offs from the end of answers', () => {
+      const input = 'Java is an OOP language [1].\n\nHope this helps! Let me know if you have any questions.'
+      const cleaned = cleanRawMarkdown(input)
+      assert.ok(!cleaned.includes('Hope this helps'))
+      assert.ok(!cleaned.includes('Let me know'))
+      assert.equal(cleaned, 'Java is an OOP language [1].')
+    })
+
+    it('should strip dangling incomplete connector fragments at the end of text', () => {
+      const input = 'Java supports many features [1]. For example,'
+      const cleaned = cleanRawMarkdown(input)
+      assert.ok(!cleaned.includes('For example'))
+      assert.equal(cleaned, 'Java supports many features [1].')
+    })
+
+    it('should strip orphaned trailing headings with no following content', () => {
+      const input = 'Java is platform-independent [1].\n\n### Next Steps'
+      const cleaned = cleanRawMarkdown(input)
+      assert.ok(!cleaned.includes('Next Steps'))
+      assert.equal(cleaned, 'Java is platform-independent [1].')
+    })
   })
 
   describe('parseMarkdownBlocks', () => {
@@ -119,6 +151,20 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       assert.ok(blocks[1].code?.includes('public static void main'))
       assert.equal(blocks[2].type, 'paragraph')
     })
+
+    it('should ignore empty headings or punctuation-only headings and strip orphaned trailing headings', () => {
+      const md = [
+        '###',
+        '### :::',
+        'Java is widely used [1].',
+        '### Trailing Orphan Heading',
+      ].join('\n')
+
+      const blocks = parseMarkdownBlocks(md)
+      assert.equal(blocks.length, 1)
+      assert.equal(blocks[0].type, 'paragraph')
+      assert.equal(blocks[0].text, 'Java is widely used [1].')
+    })
   })
 
   describe('renderInlineMarkdown', () => {
@@ -165,6 +211,13 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       const nodes = renderInlineMarkdown(inline, mockSources)
       const textOutput = nodes.filter((n) => typeof n === 'string').join('')
       assert.ok(!textOutput.includes('**'))
+    })
+
+    it('should sanitize residual metadata tokens [#operation] in fallback text', () => {
+      const inline = 'Clean answer without [#operation] residual tag.'
+      const nodes = renderInlineMarkdown(inline, mockSources)
+      const textOutput = nodes.filter((n) => typeof n === 'string').join('')
+      assert.ok(!textOutput.includes('[#operation]'))
     })
   })
 })

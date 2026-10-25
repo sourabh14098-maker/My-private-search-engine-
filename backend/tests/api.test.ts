@@ -1560,6 +1560,183 @@ describe('Backend Foundation API Tests', () => {
       const systemMsg = capturedBody.messages.find((m: any) => m.role === 'system')?.content || ''
       assert.ok(systemMsg.includes('LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT)'))
     })
+
+    it('should solve simple arithmetic queries with concise, exact calculation results', async () => {
+      const { solveSimpleArithmetic } = await import('../src/services/ai.service.js')
+
+      // Addition
+      assert.equal(solveSimpleArithmetic('What is 2 + 2?'), '2 + 2 = 4')
+      assert.equal(solveSimpleArithmetic('what is 2 + 2'), '2 + 2 = 4')
+      assert.equal(solveSimpleArithmetic('2 + 2'), '2 + 2 = 4')
+      assert.equal(solveSimpleArithmetic('2+2'), '2 + 2 = 4')
+      assert.equal(solveSimpleArithmetic('calculate 2 plus 2'), '2 + 2 = 4')
+      assert.equal(solveSimpleArithmetic('2 + 2 kitna hota hai?'), '2 + 2 = 4')
+
+      // Subtraction
+      assert.equal(solveSimpleArithmetic('What is 10 - 4?'), '10 - 4 = 6')
+      assert.equal(solveSimpleArithmetic('10 minus 4'), '10 - 4 = 6')
+
+      // Multiplication
+      assert.equal(solveSimpleArithmetic('What is 15 * 4?'), '15 * 4 = 60')
+      assert.equal(solveSimpleArithmetic('15 x 4'), '15 * 4 = 60')
+      assert.equal(solveSimpleArithmetic('7 times 8'), '7 * 8 = 56')
+
+      // Division
+      assert.equal(solveSimpleArithmetic('100 / 5'), '100 / 5 = 20')
+      assert.equal(solveSimpleArithmetic('100 divided by 5'), '100 / 5 = 20')
+
+      // Exponentiation
+      assert.equal(solveSimpleArithmetic('compute 2 ^ 8'), '2 ^ 8 = 256')
+
+      // Edge cases: division by zero and non-math queries return null safely
+      assert.equal(solveSimpleArithmetic('10 / 0'), null)
+      assert.equal(solveSimpleArithmetic('What is Java?'), null)
+    })
+
+    it('should synthesize concise direct answers for arithmetic queries without unrelated filler', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              content:
+                'In elementary mathematics, the sum of two and two equals four. Addition is a primary operation [1]. Hope this helps!',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+        fetchFn: mockFetch as any,
+      })
+
+      const sources = [
+        {
+          title: 'Basic Arithmetic',
+          url: 'https://example.com/math',
+          destinationUrl: 'https://example.com/math',
+          domain: 'example.com',
+          snippet: 'Two plus two equals four.',
+        },
+      ]
+
+      const res = await service.generateAnswer('What is 2 + 2?', sources as any)
+      assert.equal(res.status, 'ready')
+      assert.equal(res.answer, '2 + 2 = 4.')
+    })
+
+    it('should remove internal citation/annotation artifacts ([#operation], [#result]) while preserving valid citation links', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const raw =
+        'DuckDuckGo is privacy-first [#1] [#operation] and Brave features independent indexing [#2] [#result: verified]. [#thought: done]'
+      const cleaned = service.sanitizeCitations(raw, 2)
+
+      assert.ok(!cleaned.includes('[#operation]'))
+      assert.ok(!cleaned.includes('[#result'))
+      assert.ok(!cleaned.includes('[#thought'))
+      assert.ok(cleaned.includes('[1]'))
+      assert.ok(cleaned.includes('[2]'))
+      assert.equal(
+        cleaned,
+        'DuckDuckGo is privacy-first [1] and Brave features independent indexing [2].'
+      )
+    })
+
+    it('should normalize [#1] and [#1, #2] to valid citation numbers [1] and [1, 2]', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const raw = 'Verified by sources [#1, #2].'
+      const cleaned = service.sanitizeCitations(raw, 2)
+      assert.equal(cleaned, 'Verified by sources [1, 2].')
+    })
+
+    it('should preserve short direct substantive answers without rejecting them as unsupported', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Math Facts',
+          url: 'https://example.com/math',
+          destinationUrl: 'https://example.com/math',
+          domain: 'example.com',
+          snippet: '2 + 2 = 4.',
+        },
+      ]
+
+      // Short direct arithmetic answer under 20 chars (10 chars)
+      const res1 = service.evaluateAndFormatAnswer('2 + 2 = 4.', sources as any)
+      assert.equal(res1.status, 'ready')
+      assert.equal(res1.answer, '2 + 2 = 4.')
+
+      // Short direct factual answer (Paris [1].)
+      const res2 = service.evaluateAndFormatAnswer('Paris [1].', sources as any)
+      assert.equal(res2.status, 'ready')
+      assert.equal(res2.answer, 'Paris [1].')
+    })
+
+    it('should deduplicate repeated sentences across different paragraphs', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const text = [
+        'Java is an object-oriented programming language [1]. It was developed by Sun Microsystems [2].',
+        '',
+        'Java is an object-oriented programming language [1]. It is widely used in enterprise development [2].',
+      ].join('\n')
+
+      const deduplicated = service.deduplicateContent(text)
+      const matches = deduplicated.match(/Java is an object-oriented programming language/g)
+      assert.equal(matches?.length, 1, 'Sentence appearing across different paragraphs must only appear once')
+      assert.ok(deduplicated.includes('It was developed by Sun Microsystems'))
+      assert.ok(deduplicated.includes('It is widely used in enterprise development'))
+    })
+
+    it('should strip trailing conversational sign-offs, orphaned headings, and incomplete fragments in evaluateAndFormatAnswer', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Documentation',
+          url: 'https://example.com/doc',
+          destinationUrl: 'https://example.com/doc',
+          domain: 'example.com',
+          snippet: 'Java documentation.',
+        },
+      ]
+
+      const textWithTrailingJunk = [
+        'Java is widely used in enterprise systems [1].',
+        '',
+        '### Key Takeaways',
+      ].join('\n')
+
+      const res = service.evaluateAndFormatAnswer(textWithTrailingJunk, sources as any)
+      assert.equal(res.status, 'ready')
+      assert.ok(!res.answer?.includes('Key Takeaways'))
+      assert.equal(res.answer, 'Java is widely used in enterprise systems [1].')
+    })
   })
 })
 

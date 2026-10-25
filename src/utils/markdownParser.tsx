@@ -16,19 +16,35 @@ export interface MarkdownBlock {
  * 1. Strips leading artifact lines such as standalone '**', '***', '###', '====', '----'.
  * 2. Preprocesses Setext heading underlines ('===', '---') into ATX headings ('##', '###').
  * 3. Cleans orphaned leading '** ' or unclosed '**' markers at the start of sentences or labels.
+ * 4. Normalizes hash-prefixed citation badges ([#1] -> [1], [#1, #2] -> [1, 2]).
+ * 5. Strips internal citation/metadata artifacts ([#operation], [#result], [operation: ...]).
+ * 6. Strips conversational sign-offs, orphaned trailing headings, and incomplete dangling fragments.
  */
 export function cleanRawMarkdown(text: string): string {
   if (!text) return ''
   let cleaned = text.replace(/\r\n/g, '\n').trim()
 
-  // Repeatedly remove leading standalone artifact/divider lines
+  // 1. Repeatedly remove leading standalone artifact/divider lines
   cleaned = cleaned.replace(/^(\s*(?:\*{1,}|#{1,6}|={3,}|-{3,})\s*\n)+/g, '').trim()
 
-  // Preprocess Setext headings: "Title\n====" -> "## Title", "Title\n----" -> "### Title"
+  // 2. Preprocess Setext headings: "Title\n====" -> "## Title", "Title\n----" -> "### Title"
   cleaned = cleaned.replace(/^([^\n#`*-][^\n]*)\n\s*={3,}\s*$/gm, '## $1')
   cleaned = cleaned.replace(/^([^\n#`*-][^\n]*)\n\s*-{3,}\s*$/gm, '### $1')
 
-  // Clean leading orphaned "** " or unclosed "**" markers on individual lines
+  // 3. Normalize hash-prefixed numbered citations ([#1] -> [1], [#1, #2] -> [1, 2])
+  cleaned = cleaned.replace(/\[#(\d+(?:\s*,\s*#?\d+)*)\]/g, (_m, inner) => {
+    return `[${inner.replace(/#/g, '')}]`
+  })
+
+  // 4. Strip internal metadata markers ([#operation], [#result], [#step], [operation: ...])
+  cleaned = cleaned
+    .replace(/\s*\[#[a-zA-Z_][a-zA-Z0-9_-]*(?:\s*:[^\]]*)?\]/g, '')
+    .replace(
+      /\s*\[(?:operation|result|annotation|metadata|step|thought|tool_call|search_query|source_ref)(?:\s*:[^\]]*)?\]/gi,
+      ''
+    )
+
+  // 5. Clean leading orphaned "** " or unclosed "**" markers on individual lines
   const lines = cleaned.split('\n')
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -53,8 +69,74 @@ export function cleanRawMarkdown(text: string): string {
       }
     }
   }
+  cleaned = lines.join('\n').trim()
 
-  return lines.join('\n').trim()
+  // 6. Clean conversational sign-offs at the end of the text
+  const trailingFillerPatterns = [
+    /(?:[\r\n]+\s*|\s+)(?:(?:I\s+)?hope\s+(?:this|that)\s+(?:helps?|was\s+helpful)[^.\n\r]*[.!?:)]*)\s*$/i,
+    /(?:[\r\n]+\s*|\s+)(?:(?:Please\s+)?let\s+me\s+know\s+if\s+you\s+(?:have|need)[^.\n\r]*[.!?:)]*)\s*$/i,
+    /(?:[\r\n]+\s*|\s+)(?:Feel\s+free\s+to\s+ask[^.\n\r]*[.!?:)]*)\s*$/i,
+    /(?:[\r\n]+\s*|\s+)(?:Does\s+this\s+answer\s+your\s+question[^.\n\r]*[.!?:)]*)\s*$/i,
+    /(?:[\r\n]+\s*|\s+)(?:If\s+you\s+have\s+(?:any\s+)?(?:more|further|other)\s+questions[^.\n\r]*[.!?:)]*)\s*$/i,
+  ]
+
+  let changed = true
+  while (changed) {
+    const prev = cleaned
+    for (const pattern of trailingFillerPatterns) {
+      cleaned = cleaned.replace(pattern, '').trim()
+    }
+    changed = prev !== cleaned
+  }
+
+  // 7. Strip orphaned trailing headings at the end of the text
+  const lineArray = cleaned.split('\n')
+  while (lineArray.length > 0) {
+    const lastLine = lineArray[lineArray.length - 1].trim()
+    if (!lastLine) {
+      lineArray.pop()
+      continue
+    }
+    if (/^#{1,6}(?:\s+.*)?$/.test(lastLine) || /^\*\*[^*]+\*\*[:.]?$/.test(lastLine)) {
+      lineArray.pop()
+      continue
+    }
+    break
+  }
+  cleaned = lineArray.join('\n').trim()
+
+  // 8. Strip dangling incomplete connector fragments at the very end (e.g. "For example,", "such as:")
+  const danglingPatterns = [
+    /\s+(?:for example|such as|including|in addition(?: to)?|e\.g\.|i\.e\.|and|or|with|as well as|because|specifically|namely)[,:\s]*$/i,
+    /,\s*$/,
+    /;\s*$/,
+    /\s+-\s*$/,
+  ]
+
+  changed = true
+  while (changed) {
+    const prev = cleaned
+    for (const pattern of danglingPatterns) {
+      cleaned = cleaned.replace(pattern, '').trim()
+    }
+    changed = prev !== cleaned
+  }
+
+  // 9. Strip any lines that are solely empty or punctuation-only headings
+  cleaned = cleaned.replace(/^\s*#{1,6}\s*[:.\-_*]*\s*$/gm, '')
+
+  // 10. Clean up whitespace before punctuation after removal of tokens (e.g. "[1] ." -> "[1].")
+  cleaned = cleaned.replace(/([a-zA-Z0-9_)\]"'`])\s+([.,;:!?])/g, '$1$2').replace(/[ \t]{2,}/g, ' ')
+
+  // If text ends on a word after stripping dangling connector, ensure terminating period if prose
+  if (cleaned && !/[.!?)"'`\]]$/.test(cleaned) && !cleaned.endsWith('```')) {
+    const lastLine = cleaned.split('\n').pop()?.trim() || ''
+    if (!/^[-*•+]\s+/.test(lastLine) && !/^\d+\.\s+/.test(lastLine)) {
+      cleaned += '.'
+    }
+  }
+
+  return cleaned.trim()
 }
 
 /**
@@ -68,6 +150,10 @@ export function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
 
   const flushBlock = () => {
     if (currentBlock) {
+      if (currentBlock.type === 'paragraph' && !currentBlock.text?.trim()) {
+        currentBlock = null
+        return
+      }
       blocks.push(currentBlock)
       currentBlock = null
     }
@@ -122,14 +208,18 @@ export function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
       continue
     }
 
-    // 4. ATX Headings: # Heading to ###### Heading
-    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
+    // 4. ATX Headings: # Heading to ###### Heading (ignore empty or punctuation-only headings)
+    const headingMatch = trimmed.match(/^(#{1,6})(?:\s*(.*))?$/)
     if (headingMatch) {
+      const headingText = (headingMatch[2] || '').trim()
+      if (!headingText || /^[:.\-_*]+$/.test(headingText)) {
+        continue
+      }
       flushBlock()
       blocks.push({
         type: 'heading',
         level: Math.min(6, Math.max(2, headingMatch[1].length)),
-        text: headingMatch[2].trim(),
+        text: headingText,
       })
       continue
     }
@@ -137,11 +227,15 @@ export function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
     // 5. Standalone bold line as heading: **Heading Text** or **Heading Text:**
     const boldHeadingMatch = trimmed.match(/^\*\*([^*]+)\*\*[:.]?$/)
     if (boldHeadingMatch) {
+      const headingText = boldHeadingMatch[1].replace(/[:.]\s*$/, '').trim()
+      if (!headingText || /^[:.\-_*]+$/.test(headingText)) {
+        continue
+      }
       flushBlock()
       blocks.push({
         type: 'heading',
         level: 3,
-        text: boldHeadingMatch[1].replace(/[:.]\s*$/, '').trim(),
+        text: headingText,
       })
       continue
     }
@@ -188,6 +282,12 @@ export function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
   }
 
   flushBlock()
+
+  // Remove any trailing heading blocks that have no content underneath
+  while (blocks.length > 0 && blocks[blocks.length - 1].type === 'heading') {
+    blocks.pop()
+  }
+
   return blocks
 }
 
@@ -308,8 +408,14 @@ export function renderInlineMarkdown(text: string, sources: AnswerSource[]): Rea
       return <em key={`em-${index}`}>{part.slice(1, -1)}</em>
     }
 
-    // 7. Plain text fallback: Clean any leftover orphan "**" to prevent raw markdown leaks
-    const sanitizedPart = part.replace(/\*\*/g, '')
+    // 7. Plain text fallback: Clean any leftover orphan "**" and metadata tokens to prevent raw leaks
+    const sanitizedPart = part
+      .replace(/\*\*/g, '')
+      .replace(/\s*\[#[a-zA-Z_][\w-]*(?:\s*:[^\]]*)?\]/g, '')
+      .replace(
+        /\s*\[(?:operation|result|annotation|metadata|step|thought|tool_call|search_query|source_ref)(?:\s*:[^\]]*)?\]/gi,
+        ''
+      )
     return sanitizedPart
   })
 }
