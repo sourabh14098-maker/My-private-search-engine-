@@ -1737,8 +1737,232 @@ describe('Backend Foundation API Tests', () => {
       assert.ok(!res.answer?.includes('Key Takeaways'))
       assert.equal(res.answer, 'Java is widely used in enterprise systems [1].')
     })
+
+    it('should strip raw URL tracking parameters and navigation fragments in cleanSourceSnippet and cleanUrlTrackingParams', async () => {
+      const { cleanUrlTrackingParams, cleanSourceSnippet } = await import('../src/services/ai.service.js')
+
+      // 1. URL tracking parameter removal
+      const noisyUrl = 'https://example.com/java-guide?utm_source=google&utm_medium=cpc&utm_campaign=summer&v=promo123&fbclid=xyz&q=tutorial'
+      const cleanUrl = cleanUrlTrackingParams(noisyUrl)
+      assert.ok(!cleanUrl.includes('utm_source'))
+      assert.ok(!cleanUrl.includes('utm_medium'))
+      assert.ok(!cleanUrl.includes('utm_campaign'))
+      assert.ok(!cleanUrl.includes('v=promo123'))
+      assert.ok(!cleanUrl.includes('fbclid'))
+      assert.ok(cleanUrl.includes('q=tutorial'), 'Application query parameters must be preserved')
+
+      // 2. YouTube URL video ID preservation
+      const ytUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&utm_source=share'
+      const cleanYt = cleanUrlTrackingParams(ytUrl)
+      assert.ok(cleanYt.includes('v=dQw4w9WgXcQ'), 'YouTube video ID must be preserved')
+      assert.ok(!cleanYt.includes('utm_source'), 'Tracking parameter must be stripped from YouTube URL')
+
+      // 3. Noisy snippet cleaning: removes navigation fragments & tracking strings while preserving facts & code
+      const noisySnippet = [
+        'Skip to main content. Home > Languages > Java.',
+        'Java is a class-based, object-oriented language developed by James Gosling.',
+        'Code example: System.out.println("Result: " + (v = calculate())); for (int i = 0; i < 5; i++) { doWork(); }',
+        'Learn more at https://example.com/java?utm_source=rss&v=tracking99. utm_campaign=promo',
+        'Accept all cookies. All rights reserved. Copyright 2024.',
+      ].join(' ')
+
+      const cleanedSnippet = cleanSourceSnippet(noisySnippet)
+      assert.ok(!cleanedSnippet.includes('Skip to main content'))
+      assert.ok(!cleanedSnippet.includes('Home > Languages'))
+      assert.ok(!cleanedSnippet.includes('utm_source'))
+      assert.ok(!cleanedSnippet.includes('utm_campaign'))
+      assert.ok(!cleanedSnippet.includes('v=tracking99'))
+      assert.ok(!cleanedSnippet.includes('Accept all cookies'))
+      assert.ok(!cleanedSnippet.includes('All rights reserved'))
+      assert.ok(cleanedSnippet.includes('Java is a class-based, object-oriented language'))
+      assert.ok(cleanedSnippet.includes('System.out.println("Result: " + (v = calculate()));'), 'Legitimate code must be preserved')
+      assert.ok(cleanedSnippet.includes('int i = 0;'), 'Code punctuation must be preserved')
+    })
+
+    it('should detect extended Hinglish queries and preserve technical code in standard English', async () => {
+      const { detectQueryLanguageStyle, AIAnswerService } = await import('../src/services/ai.service.js')
+
+      // Hinglish query variations
+      assert.equal(detectQueryLanguageStyle('Java kaise sikhe'), 'hinglish')
+      assert.equal(detectQueryLanguageStyle('Python mein loop samjhaiye'), 'hinglish')
+      assert.equal(detectQueryLanguageStyle('Iska solution bataiye bhai'), 'hinglish')
+      assert.equal(detectQueryLanguageStyle('React component kaise banaye'), 'hinglish')
+
+      let systemPromptSent = ''
+      const mockFetch = async (_url: string, init?: RequestInit) => {
+        if (init?.body) {
+          const parsed = JSON.parse(init.body as string)
+          systemPromptSent = parsed.messages?.find((m: any) => m.role === 'system')?.content || ''
+        }
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: 'Java seekhne ke liye ye steps follow karein [1]:\n\n```java\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}\n```',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+        fetchFn: mockFetch as any,
+      })
+
+      const sources = [
+        {
+          title: 'Java Tutorial',
+          url: 'https://example.com/java',
+          destinationUrl: 'https://example.com/java',
+          domain: 'example.com',
+          snippet: 'Java basics guide.',
+        },
+      ]
+
+      const res = await service.generateAnswer('Java kaise sikhe bhai', sources as any)
+      assert.equal(res.status, 'ready')
+      assert.equal(res.languageStyle, 'hinglish')
+      assert.ok(systemPromptSent.includes('LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT)'))
+      assert.ok(systemPromptSent.includes('TECHNICAL PRESERVATION'))
+      assert.ok(res.answer?.includes('```java'))
+      assert.ok(res.answer?.includes('System.out.println("Hello, World!");'))
+    })
+
+    it('should repair malformed code blocks: duplicate labels, stray ");", unmatched quotes, and unclosed braces', async () => {
+      const { repairCodeBlocks } = await import('../src/services/ai.service.js')
+
+      // Case 1: Duplicate language labels
+      const dupLabel = [
+        '```java java',
+        'public class HelloWorld {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Hello, World!");',
+        '    }',
+        '}',
+        '```',
+      ].join('\n')
+      const repaired1 = repairCodeBlocks(dupLabel)
+      assert.ok(repaired1.startsWith('```java\n'))
+      assert.ok(!repaired1.includes('```java java'))
+
+      // Case 2: Stray ");" fragment immediately outside and inside code block
+      const strayFrag = [
+        '```java',
+        'public class Main {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Hello, World!");',
+        '        ");',
+        '    }',
+        '}',
+        '```',
+        '");',
+      ].join('\n')
+      const repaired2 = repairCodeBlocks(strayFrag)
+      assert.ok(!repaired2.split('\n').some((line) => line.trim() === '");'))
+      assert.ok(!repaired2.endsWith('");'))
+
+      // Case 3: Unmatched quotes in print statement
+      const brokenQuotes = [
+        '```java',
+        'public class Test {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Unmatched quote);',
+        '    }',
+        '}',
+        '```',
+      ].join('\n')
+      const repaired3 = repairCodeBlocks(brokenQuotes)
+      assert.ok(repaired3.includes('System.out.println("Unmatched quote");'))
+
+      // Case 4: Unclosed code block and missing closing braces
+      const unclosedCode = [
+        'Here is the Java code:',
+        '```java',
+        'public class CompleteMe {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Incomplete");',
+      ].join('\n')
+      const repaired4 = repairCodeBlocks(unclosedCode)
+      assert.ok(repaired4.endsWith('```'))
+      const openBraces = (repaired4.match(/\{/g) || []).length
+      const closeBraces = (repaired4.match(/\}/g) || []).length
+      assert.equal(openBraces, closeBraces, 'Braces must be balanced')
+
+      // Case 5: Minimal short correct example when source evidence is a lone class stub
+      const loneStub = '```java\npublic class LoneStub {\n```'
+      const repaired5 = repairCodeBlocks(loneStub)
+      assert.ok(repaired5.includes('public static void main'))
+      assert.ok(repaired5.includes('System.out.println("Hello, World!");'))
+    })
+
+    it('should return exact arithmetic results with sources: [] to prevent unrelated citations', async () => {
+      const { AIAnswerService, solveSimpleArithmetic } = await import('../src/services/ai.service.js')
+
+      // Arithmetic solving
+      assert.equal(solveSimpleArithmetic('find 1,000 + 500'), '1000 + 500 = 1500')
+      assert.equal(solveSimpleArithmetic('25 * 4'), '25 * 4 = 100')
+      assert.equal(solveSimpleArithmetic('10 % 3'), '10 % 3 = 1')
+      assert.equal(solveSimpleArithmetic('5.5 + 4.5'), '5.5 + 4.5 = 10')
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const unrelatedSources = [
+        {
+          title: 'Unrelated History Article',
+          url: 'https://example.com/history',
+          destinationUrl: 'https://example.com/history',
+          domain: 'example.com',
+          snippet: 'Random web snippet.',
+        },
+      ]
+
+      // evaluateAndFormatAnswer on arithmetic query returns empty sources
+      const res = service.evaluateAndFormatAnswer('2 + 2 = 4.', unrelatedSources as any, 'english', 'What is 2 + 2?')
+      assert.equal(res.status, 'ready')
+      assert.equal(res.answer, '2 + 2 = 4.')
+      assert.equal(res.sources?.length, 0, 'Arithmetic queries must have empty sources so unrelated citations are not displayed')
+    })
+
+    it('should preserve candidate sources and citations [1], [2] for research and explanatory answers', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const researchSources = [
+        {
+          title: 'Java Platform Documentation',
+          url: 'https://docs.oracle.com/en/java/?utm_source=share',
+          destinationUrl: 'https://docs.oracle.com/en/java/?utm_source=share',
+          domain: 'oracle.com',
+          snippet: 'Skip to main content. Java is an OOP language with memory management.',
+        },
+        {
+          title: 'Wikipedia Java',
+          url: 'https://en.wikipedia.org/wiki/Java_(programming_language)',
+          destinationUrl: 'https://en.wikipedia.org/wiki/Java_(programming_language)',
+          domain: 'wikipedia.org',
+          snippet: 'Java was originally developed by James Gosling.',
+        },
+      ]
+
+      const explanatoryAnswer = 'Java is an object-oriented language [1] developed by James Gosling [2].'
+      const res = service.evaluateAndFormatAnswer(explanatoryAnswer, researchSources as any, 'english', 'What is Java?')
+
+      assert.equal(res.status, 'ready')
+      assert.equal(res.answer, 'Java is an object-oriented language [1] developed by James Gosling [2].')
+      assert.equal(res.sources?.length, 2, 'Explanatory research queries must preserve candidate sources')
+      assert.ok(res.sources![0].destinationUrl.includes('docs.oracle.com'))
+      assert.ok(!res.sources![0].destinationUrl.includes('utm_source'), 'Tracking query param must be stripped from destinationUrl')
+    })
   })
 })
+
 
 
 

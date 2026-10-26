@@ -34,8 +34,8 @@ const searchProvider: SearchProviderType =
   rawProvider === 'brave' || rawProvider === 'mock' || rawProvider === 'searxng'
     ? rawProvider
     : process.env.DEMO_MODE === 'false'
-    ? 'brave'
-    : 'mock'
+      ? 'brave'
+      : 'mock'
 
 // Resolves active AI inference provider (default: 'none' to preserve user privacy)
 const rawAIProvider = (process.env.AI_PROVIDER || 'none').toLowerCase().trim()

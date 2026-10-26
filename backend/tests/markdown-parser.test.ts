@@ -219,5 +219,102 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       const textOutput = nodes.filter((n) => typeof n === 'string').join('')
       assert.ok(!textOutput.includes('[#operation]'))
     })
+
+    it('should clean raw URL tracking noise (utm_source, v=) from fallback plain text', () => {
+      const inline = 'Visit https://example.com/guide?utm_source=twitter&v=promo123 for details.'
+      const nodes = renderInlineMarkdown(inline, mockSources)
+      const textOutput = nodes.filter((n) => typeof n === 'string').join('')
+      assert.ok(!textOutput.includes('utm_source'))
+      assert.ok(!textOutput.includes('v=promo123'))
+    })
+  })
+
+  describe('DitchX Code Block Repair & Clean Snippet Tests', () => {
+    it('should repair duplicate language labels on code fences (e.g. ```java java -> ```java)', () => {
+      const input = [
+        'Here is a Java class:',
+        '```java java',
+        'public class Main {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Hello, World!");',
+        '    }',
+        '}',
+        '```',
+      ].join('\n')
+
+      const cleaned = cleanRawMarkdown(input)
+      assert.ok(cleaned.includes('```java'))
+      assert.ok(!cleaned.includes('```java java'))
+
+      const blocks = parseMarkdownBlocks(input)
+      assert.equal(blocks.length, 2)
+      assert.equal(blocks[1].type, 'code-block')
+      assert.equal(blocks[1].language, 'java')
+      assert.ok(blocks[1].code?.includes('public class Main'))
+    })
+
+    it('should strip stray fragments such as lone ");" following or inside code blocks', () => {
+      const input = [
+        '```java',
+        'public class HelloWorld {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Hello, World!");',
+        '        ");',
+        '    }',
+        '}',
+        '```',
+        '");',
+        'Next paragraph.',
+      ].join('\n')
+
+      const cleaned = cleanRawMarkdown(input)
+      assert.ok(!cleaned.includes('\n");'))
+
+      const blocks = parseMarkdownBlocks(input)
+      const codeBlock = blocks.find((b) => b.type === 'code-block')
+      assert.ok(codeBlock)
+      assert.ok(!codeBlock.code?.split('\n').some((line) => line.trim() === '");'))
+
+      const paragraphs = blocks.filter((b) => b.type === 'paragraph')
+      assert.ok(!paragraphs.some((p) => p.text?.includes('");')))
+    })
+
+    it('should complete unclosed code blocks with balanced curly braces', () => {
+      const unclosed = [
+        'Java example:',
+        '```java',
+        'public class HelloWorld {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Hello, World!");',
+      ].join('\n')
+
+      const blocks = parseMarkdownBlocks(unclosed)
+      assert.equal(blocks.length, 2)
+      assert.equal(blocks[1].type, 'code-block')
+      assert.equal(blocks[1].language, 'java')
+      assert.ok(blocks[1].code?.includes('System.out.println'))
+      assert.ok(blocks[1].code?.includes('}'))
+    })
+
+    it('should clean URL tracking parameters and navigation fragments in cleanRawMarkdown', () => {
+      const rawText = [
+        'Skip to main content. Home > Programming > Java.',
+        'Java is an object-oriented programming language [1].',
+        'Visit https://oracle.com/java?utm_source=adwords&utm_medium=cpc&utm_campaign=brand&v=tracking123.',
+        'Accept all cookies. All rights reserved. Copyright 2024.',
+      ].join('\n\n')
+
+      const cleaned = cleanRawMarkdown(rawText)
+      assert.ok(!cleaned.includes('Skip to main content'))
+      assert.ok(!cleaned.includes('Home > Programming'))
+      assert.ok(!cleaned.includes('utm_source'))
+      assert.ok(!cleaned.includes('utm_medium'))
+      assert.ok(!cleaned.includes('v=tracking123'))
+      assert.ok(!cleaned.includes('Accept all cookies'))
+      assert.ok(!cleaned.includes('All rights reserved'))
+      assert.ok(cleaned.includes('Java is an object-oriented programming language [1].'))
+      assert.ok(cleaned.includes('https://oracle.com/java'))
+    })
   })
 })
+
