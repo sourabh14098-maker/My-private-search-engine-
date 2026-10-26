@@ -175,12 +175,17 @@ export function cleanRawMarkdown(text: string): string {
     .replace(/\b(?:utm_source|utm_medium|utm_campaign|utm_term|utm_content)\s*=\s*[^\s&)"']+/gi, '')
     .replace(/[?&]v=[a-zA-Z0-9_%-]+/gi, '')
     .replace(/(?:^|\s)v=[a-zA-Z0-9_%-]{6,}(?:\s|$)/g, ' ')
+    // Strip accidental URL fragments copied from search snippets (e.g. com/courses/java-spring-boot-0-to-100/)
+    .replace(/(?<![`@.:/a-zA-Z0-9_-])(?:com|org|net|edu|gov|io|ai|app|dev|co\.[a-z]{2})\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
+    .replace(/(?<![a-zA-Z0-9_])(?:\.{2,3}|…|[›>»])\s*(?:[a-zA-Z0-9_-]+\.)*(?:com|org|net|edu|gov|io|ai|app|dev)?\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
     // Strip navigation remnants
     .replace(/(?:^|\s*)(?:jump|skip)\s+to\s+(?:navigation|content|main\s+content)[.:;]?\s*/gi, ' ')
     .replace(/(?:^|\s*)(?:navigation\s+menu|main\s+menu|toggle\s+navigation)[.:;]?\s*/gi, ' ')
     .replace(/(?:^|\s*)(?:(?:accept(?:\s+all)?\s+cookies|cookie\s+policy|cookies\s+notice)\b[^.\n\r]*[.:;]?\s*)/gi, ' ')
     .replace(/(?:^|[\s.;•·|])(?:home|index)\s*(?:[>»/|]|&gt;)\s*[A-Za-z0-9\s_-]+(?:\s*(?:[>»/|]|&gt;)\s*[A-Za-z0-9\s_-]+)*[.:;]?\s*/gi, ' ')
     .replace(/(?:all\s+rights\s+reserved|copyright\s+©?\s*\d{4})\b[^.\n\r]*[.]?/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
 
   // 4. Repeatedly remove leading standalone artifact/divider lines
   cleaned = cleaned.replace(/^(\s*(?:\*{1,}|#{1,6}|={3,}|-{3,})\s*\n)+/g, '').trim()
@@ -587,11 +592,15 @@ export function renderInlineMarkdown(text: string, sources: AnswerSource[]): Rea
       .replace(/\b(?:utm_source|utm_medium|utm_campaign|utm_term|utm_content)\s*=\s*[^\s&)"']+/gi, '')
       .replace(/[?&]v=[a-zA-Z0-9_%-]+/gi, '')
       .replace(/(?:^|\s)v=[a-zA-Z0-9_%-]{6,}(?:\s|$)/g, ' ')
+      .replace(/(?<![`@.:/a-zA-Z0-9_-])(?:com|org|net|edu|gov|io|ai|app|dev|co\.[a-z]{2})\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
+      .replace(/(?<![a-zA-Z0-9_])(?:\.{2,3}|…|[›>»])\s*(?:[a-zA-Z0-9_-]+\.)*(?:com|org|net|edu|gov|io|ai|app|dev)?\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
       .replace(/\s*\[#[a-zA-Z_][\w-]*(?:\s*:[^\]]*)?\]/g, '')
       .replace(
         /\s*\[(?:operation|result|annotation|metadata|step|thought|tool_call|search_query|source_ref)(?:\s*:[^\]]*)?\]/gi,
         ''
       )
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\s+([.,;:!?])/g, '$1')
     return sanitizedPart
   })
 }

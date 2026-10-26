@@ -1960,6 +1960,72 @@ describe('Backend Foundation API Tests', () => {
       assert.ok(res.sources![0].destinationUrl.includes('docs.oracle.com'))
       assert.ok(!res.sources![0].destinationUrl.includes('utm_source'), 'Tracking query param must be stripped from destinationUrl')
     })
+
+    it('should strip accidental URL fragments (e.g. com/courses/java-spring-boot-0-to-100/) while preserving intentional URLs and code', async () => {
+      const { AIAnswerService, cleanSourceSnippet } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      // 1. Snippet cleaning removes accidental URL fragments and breadcrumbs
+      const noisySnippet = 'Java seekhein. com/courses/java-spring-boot-0-to-100/ ek badhiya resource hai. Official site https://spring.io par available hai.'
+      const cleanedSnippet = cleanSourceSnippet(noisySnippet)
+      assert.ok(!cleanedSnippet.includes('com/courses/java-spring-boot-0-to-100/'), 'Snippet must not contain accidental URL fragment')
+      assert.ok(cleanedSnippet.includes('https://spring.io'), 'Intentional URL must be preserved in snippet')
+
+      // 2. Hinglish natural-language answer with leaked URL fragment
+      const hinglishWithAccidentalUrl = [
+        'Java aur Spring Boot sikhne ke liye aap com/courses/java-spring-boot-0-to-100/ dekh sakte hain [1].',
+        'Official documentation https://spring.io/projects/spring-boot par available hai [2].',
+        'Example code:',
+        '```java',
+        'import com.example.service.UserService;',
+        'public class App {',
+        '    public static void main(String[] args) {',
+        '        String endpoint = "com/courses/java-spring-boot-0-to-100/";',
+        '        System.out.println("Endpoint: " + endpoint);',
+        '    }',
+        '}',
+        '```',
+      ].join('\n')
+
+      const sources = [
+        {
+          title: 'Spring Boot Guide',
+          url: 'https://spring.io/guides',
+          destinationUrl: 'https://spring.io/guides',
+          snippet: 'Official guide to building apps with Spring Boot.',
+        },
+        {
+          title: 'Spring Boot Projects',
+          url: 'https://spring.io/projects/spring-boot',
+          destinationUrl: 'https://spring.io/projects/spring-boot',
+          snippet: 'Overview of Spring Boot project features.',
+        },
+      ]
+
+      const res = service.evaluateAndFormatAnswer(
+        hinglishWithAccidentalUrl,
+        sources as any,
+        'hinglish',
+        'Java Spring Boot course ke bare me bataiye'
+      )
+
+      assert.equal(res.status, 'ready')
+      assert.equal(res.languageStyle, 'hinglish')
+      // Prose must not contain the accidental URL fragment
+      assert.ok(!res.answer?.includes('com/courses/java-spring-boot-0-to-100/ dekh'))
+      assert.ok(res.answer?.includes('aap dekh sakte hain [1]'))
+      // Intentional URL must be preserved
+      assert.ok(res.answer?.includes('https://spring.io/projects/spring-boot'))
+      // Citations [1] and [2] preserved
+      assert.ok(res.answer?.includes('[1]'))
+      assert.ok(res.answer?.includes('[2]'))
+      // Code block content must remain intact, including package statements and strings
+      assert.ok(res.answer?.includes('import com.example.service.UserService;'))
+      assert.ok(res.answer?.includes('String endpoint = "com/courses/java-spring-boot-0-to-100/";'))
+    })
   })
 })
 

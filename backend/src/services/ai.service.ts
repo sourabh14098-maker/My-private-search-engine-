@@ -258,6 +258,9 @@ export function cleanSourceSnippet(text: string): string {
     .replace(/\b(?:utm_source|utm_medium|utm_campaign|utm_term|utm_content)\s*=\s*[^\s&)"']+/gi, '')
     .replace(/[?&]v=[a-zA-Z0-9_%-]+/gi, '')
     .replace(/(?:^|\s)v=[a-zA-Z0-9_%-]{6,}(?:\s|$)/g, ' ')
+    // Strip accidental URL fragments and truncated snippet paths (e.g. com/courses/java-spring-boot-0-to-100/)
+    .replace(/(?<![`@.:/a-zA-Z0-9_-])(?:com|org|net|edu|gov|io|ai|app|dev|co\.[a-z]{2})\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
+    .replace(/(?<![a-zA-Z0-9_])(?:\.{2,3}|…|[›>»])\s*(?:[a-zA-Z0-9_-]+\.)*(?:com|org|net|edu|gov|io|ai|app|dev)?\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
 
   // 3. Strip scraped navigation fragments
   const navPatterns = [
@@ -306,6 +309,9 @@ export function cleanAnswerNoise(text: string): string {
     .replace(/\b(?:utm_source|utm_medium|utm_campaign|utm_term|utm_content)\s*=\s*[^\s&)"']+/gi, '')
     .replace(/[?&]v=[a-zA-Z0-9_%-]+/gi, '')
     .replace(/(?:^|\s)v=[a-zA-Z0-9_%-]{6,}(?:\s|$)/g, ' ')
+    // Strip accidental URL fragments copied from search snippets (e.g. com/courses/java-spring-boot-0-to-100/)
+    .replace(/(?<![`@.:/a-zA-Z0-9_-])(?:com|org|net|edu|gov|io|ai|app|dev|co\.[a-z]{2})\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
+    .replace(/(?<![a-zA-Z0-9_])(?:\.{2,3}|…|[›>»])\s*(?:[a-zA-Z0-9_-]+\.)*(?:com|org|net|edu|gov|io|ai|app|dev)?\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
     // Strip scraped navigation remnants
     .replace(/(?:^|\s*)(?:jump|skip)\s+to\s+(?:navigation|content|main\s+content)[.:;]?\s*/gi, ' ')
     .replace(/(?:^|\s*)(?:navigation\s+menu|main\s+menu|toggle\s+navigation)[.:;]?\s*/gi, ' ')
@@ -313,6 +319,7 @@ export function cleanAnswerNoise(text: string): string {
     .replace(/(?:^|[\s.;•·|])(?:home|index)\s*(?:[>»/|]|&gt;)\s*[A-Za-z0-9\s_-]+(?:\s*(?:[>»/|]|&gt;)\s*[A-Za-z0-9\s_-]+)*[.:;]?\s*/gi, ' ')
     .replace(/(?:all\s+rights\s+reserved|copyright\s+©?\s*\d{4})\b[^.\n\r]*[.]?/gi, '')
     .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
     .trim()
 
   // Restore code blocks
@@ -1096,7 +1103,7 @@ export class AIAnswerService implements IAIAnswerService {
 
       // Regular text or headings: deduplicate identical/near-identical sentences across entire text
       if (!trimmed.startsWith('#')) {
-        const sentences = trimmed.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) || [trimmed]
+        const sentences = trimmed.split(/(?<=[.!?])\s+/)
         const cleanSentences: string[] = []
 
         for (const sent of sentences) {

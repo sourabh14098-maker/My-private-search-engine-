@@ -315,6 +315,26 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       assert.ok(cleaned.includes('Java is an object-oriented programming language [1].'))
       assert.ok(cleaned.includes('https://oracle.com/java'))
     })
+
+    it('should strip accidental URL fragments in cleanRawMarkdown while preserving intentional URLs, markdown links, and backtick code', () => {
+      const input = [
+        'Java aur Spring Boot sikhne ke liye aap com/courses/java-spring-boot-0-to-100/ dekh sakte hain [1].',
+        'Official link: [Spring Boot](https://spring.io/projects/spring-boot).',
+        'Direct URL: https://spring.io/guides/gs/spring-boot/ is also helpful.',
+        'Configure package `com/courses/config` in your settings.',
+        '```java',
+        'String url = "com/courses/java-spring-boot-0-to-100/";',
+        '```',
+      ].join('\n\n')
+
+      const cleaned = cleanRawMarkdown(input)
+      assert.ok(!cleaned.includes('com/courses/java-spring-boot-0-to-100/ dekh'))
+      assert.ok(cleaned.includes('aap dekh sakte hain [1].'))
+      assert.ok(cleaned.includes('[Spring Boot](https://spring.io/projects/spring-boot)'))
+      assert.ok(cleaned.includes('https://spring.io/guides/gs/spring-boot/'))
+      assert.ok(cleaned.includes('`com/courses/config`'))
+      assert.ok(cleaned.includes('String url = "com/courses/java-spring-boot-0-to-100/";'))
+    })
   })
 })
 
