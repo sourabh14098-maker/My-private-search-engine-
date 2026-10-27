@@ -1957,8 +1957,10 @@ describe('Backend Foundation API Tests', () => {
       assert.equal(res.status, 'ready')
       assert.equal(res.answer, 'Java is an object-oriented language [1] developed by James Gosling [2].')
       assert.equal(res.sources?.length, 2, 'Explanatory research queries must preserve candidate sources')
-      assert.ok(res.sources![0].destinationUrl.includes('docs.oracle.com'))
-      assert.ok(!res.sources![0].destinationUrl.includes('utm_source'), 'Tracking query param must be stripped from destinationUrl')
+      const destinationUrl = res.sources?.[0]?.destinationUrl
+      assert.ok(destinationUrl)
+      assert.ok(destinationUrl.includes('docs.oracle.com'))
+      assert.ok(!destinationUrl.includes('utm_source'), 'Tracking query param must be stripped from destinationUrl')
     })
 
     it('should strip accidental URL fragments (e.g. com/courses/java-spring-boot-0-to-100/) while preserving intentional URLs and code', async () => {
