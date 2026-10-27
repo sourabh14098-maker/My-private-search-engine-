@@ -4,6 +4,8 @@ import {
   cleanRawMarkdown,
   parseMarkdownBlocks,
   renderInlineMarkdown,
+  correctProgrammingInaccuracies,
+  repairCodeBlocks,
 } from '../../src/utils/markdownParser.js'
 import type { AnswerSource } from '../../src/types.js'
 
@@ -410,6 +412,55 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       assert.ok(linkAnchor, 'Markdown link must be rendered as anchor')
       assert.equal(linkAnchor.props.href, 'https://spring.io/projects/spring-boot')
       assert.equal(linkAnchor.props.children, 'Spring Boot')
+    })
+
+    it('should correct false claims that Java supports multiple inheritance of classes and complete runnable main method', () => {
+      const input = [
+        '### Java Inheritance',
+        'Java supports multiple inheritance of classes by allowing a class to extend multiple classes [1].',
+        '',
+        '```java',
+        'class Animal {',
+        '    void sound() { System.out.println("Animal sound"); }',
+        '}',
+        'class Cat extends Animal {',
+        '    void meow() { System.out.println("Cat meows"); }',
+        '}',
+        '```',
+      ].join('\n')
+
+      const cleaned = cleanRawMarkdown(input)
+      assert.ok(cleaned.includes('Java does not support multiple inheritance of classes'))
+      assert.ok(cleaned.includes('instead, Java supports implementing multiple interfaces'))
+      assert.ok(!cleaned.includes('Java supports multiple inheritance of classes by'))
+
+      // Code block must contain parent class, child class with extends, and runnable main() method
+      assert.ok(cleaned.includes('class Animal {'))
+      assert.ok(cleaned.includes('class Cat extends Animal {'))
+      assert.ok(cleaned.includes('public static void main(String[] args) {'))
+      assert.ok(cleaned.includes('Cat cat = new Cat();'))
+      assert.ok(cleaned.includes('cat.sound();'))
+      assert.ok(cleaned.includes('cat.meow();'))
+
+      // Parse blocks must preserve the complete code block
+      const blocks = parseMarkdownBlocks(input)
+      const codeBlock = blocks.find((b) => b.type === 'code-block')
+      assert.ok(codeBlock)
+      assert.equal(codeBlock?.language, 'java')
+      assert.ok(codeBlock?.code?.includes('class Animal {'))
+      assert.ok(codeBlock?.code?.includes('class Cat extends Animal {'))
+      assert.ok(codeBlock?.code?.includes('public static void main(String[] args) {'))
+
+      // Direct test for correctProgrammingInaccuracies
+      const testHinglish = 'Java classes ka multiple inheritance support karta hai.'
+      const resHinglish = correctProgrammingInaccuracies(testHinglish, 'hinglish')
+      assert.ok(resHinglish.includes('Java classes ke multiple inheritance ko support nahi karta'))
+      assert.ok(resHinglish.includes('multiple interfaces implement karne ki suvidha deta hai'))
+
+      // Direct test for repairCodeBlocks in inheritance context
+      const repairedStub = repairCodeBlocks('```java\npublic class LoneStub {\n```', 'Explain Java inheritance')
+      assert.ok(repairedStub.includes('class Dog extends Animal {'))
+      assert.ok(repairedStub.includes('public static void main(String[] args) {'))
     })
   })
 })

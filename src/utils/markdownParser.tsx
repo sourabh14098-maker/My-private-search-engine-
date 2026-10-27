@@ -19,8 +19,115 @@ export interface MarkdownBlock {
  * - Completes missing closing curly braces or unclosed code fences.
  * - If source evidence is minimal, provides a short correct example rather than a broken one.
  */
-export function repairCodeBlocks(text: string): string {
+/**
+ * Ensures Java code examples are complete, demonstrate requested concepts like inheritance,
+ * and include a runnable main() method.
+ */
+function ensureRunnableJavaMain(
+  lines: string[],
+  cleanLang: string,
+  isJavaInheritanceContext: boolean
+): string[] {
+  if (cleanLang !== 'java') return lines
+
+  const joined = lines.join('\n')
+  const nonEmptyLines = lines.filter((l) => l.trim().length > 0)
+
+  // 1. Lone class header stub without body, methods, or inheritance
+  if (
+    nonEmptyLines.length <= 2 &&
+    /^\s*public\s+class\s+\w+\s*\{?\s*$/.test(nonEmptyLines[0] || '') &&
+    (nonEmptyLines.length === 1 || /^\s*\}\s*$/.test(nonEmptyLines[1] || ''))
+  ) {
+    if (isJavaInheritanceContext) {
+      return [
+        '// Parent class (Superclass)',
+        'class Animal {',
+        '    void eat() {',
+        '        System.out.println("This animal eats food.");',
+        '    }',
+        '}',
+        '',
+        '// Child class (Subclass) inheriting from Animal',
+        'class Dog extends Animal {',
+        '    void bark() {',
+        '        System.out.println("The dog barks.");',
+        '    }',
+        '}',
+        '',
+        'public class Main {',
+        '    public static void main(String[] args) {',
+        '        Dog myDog = new Dog();',
+        '        myDog.eat(); // Inherited method from Animal',
+        '        myDog.bark(); // Subclass own method',
+        '    }',
+        '}',
+      ]
+    }
+
+    const classMatch = lines.join(' ').match(/public\s+class\s+(\w+)/)
+    const className = classMatch ? classMatch[1] : 'Main'
+    return [
+      `public class ${className} {`,
+      '    public static void main(String[] args) {',
+      '        System.out.println("Hello, World!");',
+      '    }',
+      '}',
+    ]
+  }
+
+  // 2. Inheritance code block missing a runnable main() method
+  const hasInheritance = lines.some((l) => /\bclass\s+\w+\s+extends\s+\w+/.test(l))
+  const hasMain = lines.some((l) => /public\s+static\s+void\s+main/.test(l))
+
+  if (hasInheritance && !hasMain) {
+    const subClassMatch = joined.match(/\bclass\s+([A-Za-z0-9_]+)\s+extends\s+([A-Za-z0-9_]+)/)
+    if (subClassMatch) {
+      const subClass = subClassMatch[1]
+      const varName = subClass.charAt(0).toLowerCase() + subClass.slice(1)
+
+      // Find zero-argument method names defined in the classes
+      const methodMatches = [...joined.matchAll(/(?:void|[A-Za-z0-9_<>]+)\s+([a-z][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/g)].map(
+        (m) => m[1]
+      )
+      const excluded = new Set(['main', 'if', 'for', 'while', 'switch', 'catch', 'super', 'this'])
+      const methodNames = [...new Set(methodMatches.filter((m) => !excluded.has(m)))]
+      const calls = methodNames.slice(0, 3).map((m) => `        ${varName}.${m}();`)
+
+      const hasPublicClass = lines.some((l) => /public\s+class\s+\w+/.test(l))
+      const mainClassDecl = hasPublicClass ? 'class Main {' : 'public class Main {'
+
+      const mainLines = [
+        '',
+        mainClassDecl,
+        '    public static void main(String[] args) {',
+        `        ${subClass} ${varName} = new ${subClass}();`,
+        ...calls,
+        '    }',
+        '}',
+      ]
+
+      return [...lines, ...mainLines]
+    }
+  }
+
+  return lines
+}
+
+/**
+ * Repairs malformed programming code answers:
+ * - Ensures Java and other programming examples are complete, syntactically coherent, and in fenced code blocks.
+ * - Removes duplicate language tags (```java java -> ```java, or redundant "java" line).
+ * - Removes stray syntax fragments like `");`, `');`, broken braces, or unmatched quotes.
+ * - Completes missing closing curly braces or unclosed code fences.
+ * - If source evidence is minimal, provides a short correct example rather than a broken one.
+ */
+export function repairCodeBlocks(text: string, query?: string): string {
   if (!text) return ''
+
+  const isJavaInheritanceContext =
+    (/inheritance/i.test(query || '') || /inheritance/i.test(text)) &&
+    (/java/i.test(query || '') || /java/i.test(text))
 
   // 1. Normalize code fences with duplicated language tags on the same line: e.g. ```java java -> ```java
   let result = text.replace(/^```[ \t]*([a-zA-Z0-9_#+-]+)(?:[ \t,:]+([a-zA-Z0-9_#+-]+))+[^\r\n]*$/gm, '```$1')
@@ -75,24 +182,8 @@ export function repairCodeBlocks(text: string): string {
       }
     }
 
-    // If source evidence is a lone class header stub without body, methods, or inheritance
-    const nonEmptyLines = lines.filter((l: string) => l.trim().length > 0)
-    if (
-      cleanLang === 'java' &&
-      nonEmptyLines.length <= 2 &&
-      /^\s*public\s+class\s+\w+\s*\{?\s*$/.test(nonEmptyLines[0] || '') &&
-      (nonEmptyLines.length === 1 || /^\s*\}\s*$/.test(nonEmptyLines[1] || ''))
-    ) {
-      const classMatch = lines.join(' ').match(/public\s+class\s+(\w+)/)
-      const className = classMatch ? classMatch[1] : 'Main'
-      lines = [
-        `public class ${className} {`,
-        '    public static void main(String[] args) {',
-        '        System.out.println("Hello, World!");',
-        '    }',
-        '}',
-      ]
-    }
+    // Ensure runnable Java code and demonstrate inheritance when applicable
+    lines = ensureRunnableJavaMain(lines, cleanLang, isJavaInheritanceContext)
 
     return `\`\`\`${cleanLang}\n${lines.join('\n')}\n\`\`\``
   })
@@ -139,6 +230,8 @@ export function repairCodeBlocks(text: string): string {
       }
     }
 
+    lines = ensureRunnableJavaMain(lines, lang, isJavaInheritanceContext)
+
     result = `${beforeFence}\`\`\`${lang}\n${lines.join('\n')}\n\`\`\``
   }
 
@@ -149,21 +242,83 @@ export function repairCodeBlocks(text: string): string {
 }
 
 /**
+ * Corrects programming inaccuracies in AI synthesized answers:
+ * - Ensures Java is never described as supporting multiple inheritance of classes.
+ * - Explains that Java avoids ambiguity (such as the diamond problem) by not supporting multiple class inheritance,
+ *   and supports implementing multiple interfaces instead.
+ */
+export function correctProgrammingInaccuracies(text: string, languageStyle?: string): string {
+  if (!text) return ''
+
+  // Isolate fenced code blocks to ensure code identifiers/comments are never modified
+  const codeBlocks: string[] = []
+  let masked = text.replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
+    codeBlocks.push(match)
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`
+  })
+
+  const style = languageStyle || 'english'
+
+  let replacement: string
+  if (style === 'hinglish') {
+    replacement = 'Java classes ke multiple inheritance ko support nahi karta (diamond problem se bachne ke liye); balki Java multiple interfaces implement karne ki suvidha deta hai'
+  } else if (style === 'hindi') {
+    replacement = 'Java classes के multiple inheritance को support नहीं करता (diamond problem से बचने के लिए); इसके बजाय Java multiple interfaces implement करने की सुविधा देता है'
+  } else {
+    replacement = 'Java does not support multiple inheritance of classes (to avoid ambiguity like the diamond problem); instead, Java supports implementing multiple interfaces'
+  }
+
+  // Patterns that falsely assert Java supports multiple inheritance of classes
+  const falseClassInheritancePatterns = [
+    // "Java supports/allows/enables/provides multiple inheritance of classes" / "through classes" / "with classes" / "using classes"
+    /(?<!(?:not|n't|never|no|doesn't|does\s+not|cannot|won't)\s+)\b(?:Java|java)\s+(?:supports?|allows?|enables?|provides?)\s+multiple\s+inheritance\s+(?:of|through|with|using)\s+classes/gi,
+    // "Java supports/allows multiple class inheritance"
+    /(?<!(?:not|n't|never|no|doesn't|does\s+not|cannot|won't)\s+)\b(?:Java|java)\s+(?:supports?|allows?|enables?|provides?)\s+multiple\s+class\s+inheritance/gi,
+    // "multiple inheritance of classes is supported/allowed/possible in Java"
+    /(?:In\s+Java,?\s+)?multiple\s+inheritance\s+of\s+classes\s+is\s+(?:supported|allowed|possible)(?!\s+not)/gi,
+    // "Java allows/lets a class to extend multiple classes"
+    /(?<!(?:not|n't|never|no|doesn't|does\s+not|cannot|won't)\s+)\b(?:Java|java)\s+(?:allows?|lets?)\s+(?:a\s+class\s+to\s+)?(?:extend|inherit\s+from)\s+multiple\s+classes/gi,
+    // "a class in Java can extend multiple classes"
+    /(?<!(?:not|n't|never|no|cannot)\s+)\b(?:a\s+class\s+in\s+Java\s+can\s+(?:extend|inherit\s+from)\s+multiple\s+classes)/gi,
+    // Hinglish patterns
+    /(?<!(?:nahi|nahin|mat)\s+)\b(?:Java|java)\s+(?:classes\s+ka\s+multiple\s+inheritance|multiple\s+inheritance\s+of\s+classes)\s+support\s+karta\s+hai/gi,
+    /(?<!(?:nahi|nahin|mat)\s+)\b(?:Java|java)\s+(?:mein\s+)?classes\s+multiple\s+inheritance\s+support\s+karti\s+hain/gi,
+    // Hindi patterns
+    /(?<!(?:नहीं|न|मत)\s+)(?:जावा|Java)\s+(?:क्लासेज\s+के\s+मल्टीपल\s+इनहेरिटेंस\s+को|मल्टीपल\s+क्लास\s+इनहेरिटेंस\s+को)\s+सपोर्ट\s+करता\s+है/gi,
+  ]
+
+  for (const pattern of falseClassInheritancePatterns) {
+    masked = masked.replace(pattern, replacement)
+  }
+
+  // Also catch unqualified statements: "Java supports multiple inheritance." without mentioning interfaces or negation
+  const unqualifiedMultipleInheritance = /(?<!(?:not|n't|never|no|doesn't|does\s+not|cannot|won't)\s+)\b(?:Java|java)\s+(?:supports?|allows?)\s+multiple\s+inheritance\b(?!\s+(?:only\s+)?(?:through|via|by|using)\s+interfaces?)(?!\s+(?:is\s+not|is\s+unsupported))/gi
+  masked = masked.replace(unqualifiedMultipleInheritance, replacement)
+
+  // Restore code blocks
+  return masked.replace(/__CODE_BLOCK_(\d+)__/g, (_m, idx) => codeBlocks[Number(idx)] || '')
+}
+
+/**
  * Normalizes raw LLM output before block parsing:
- * 1. Repairs malformed code answers (fencing, stray fragments, braces, quotes).
- * 2. Strips URL-tracking strings (utm_*, v=) and scraped navigation fragments.
- * 3. Strips leading artifact lines such as standalone '**', '***', '###', '====', '----'.
- * 4. Preprocesses Setext heading underlines ('===', '---') into ATX headings ('##', '###').
- * 5. Cleans orphaned leading '** ' or unclosed '**' markers at the start of sentences or labels.
- * 6. Normalizes hash-prefixed citation badges ([#1] -> [1], [#1, #2] -> [1, 2]).
- * 7. Strips internal citation/metadata artifacts ([#operation], [#result], [operation: ...]).
- * 8. Strips conversational sign-offs, orphaned trailing headings, and incomplete dangling fragments.
+ * 1. Corrects programming inaccuracies (e.g. Java multiple class inheritance claims).
+ * 2. Repairs malformed code answers (fencing, stray fragments, braces, quotes, runnable main).
+ * 3. Strips URL-tracking strings (utm_*, v=) and scraped navigation fragments.
+ * 4. Strips leading artifact lines such as standalone '**', '***', '###', '====', '----'.
+ * 5. Preprocesses Setext heading underlines ('===', '---') into ATX headings ('##', '###').
+ * 6. Cleans orphaned leading '** ' or unclosed '**' markers at the start of sentences or labels.
+ * 7. Normalizes hash-prefixed citation badges ([#1] -> [1], [#1, #2] -> [1, 2]).
+ * 8. Strips internal citation/metadata artifacts ([#operation], [#result], [operation: ...]).
+ * 9. Strips conversational sign-offs, orphaned trailing headings, and incomplete dangling fragments.
  */
 export function cleanRawMarkdown(text: string): string {
   if (!text) return ''
 
-  // 1. Repair code blocks first
-  let cleaned = repairCodeBlocks(text.replace(/\r\n/g, '\n')).trim()
+  // 1. Correct programming inaccuracies first
+  let cleaned = correctProgrammingInaccuracies(text)
+
+  // 2. Repair code blocks
+  cleaned = repairCodeBlocks(cleaned.replace(/\r\n/g, '\n')).trim()
 
   // 2. Isolate code blocks during prose markdown cleaning
   const codeBlocks: string[] = []

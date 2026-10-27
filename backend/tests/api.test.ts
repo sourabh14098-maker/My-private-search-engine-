@@ -2262,6 +2262,121 @@ describe('Backend Foundation API Tests', () => {
       assert.ok(cleaned.includes('System.out.println("Tuut, tuut!");'))
       assert.ok(!cleaned.includes('System.out.println("Hello, World!");'))
     })
+
+    it('should correct false claims that Java supports multiple inheritance of classes in English, Hinglish, and Hindi', async () => {
+      const { AIAnswerService, correctProgrammingInaccuracies } = await import('../src/services/ai.service.js')
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Java Interfaces & Inheritance',
+          url: 'https://docs.oracle.com/javase/tutorial/java/IandI/index.html',
+          destinationUrl: 'https://docs.oracle.com/javase/tutorial/java/IandI/index.html',
+          domain: 'oracle.com',
+          snippet: 'Java allows classes to implement multiple interfaces, but a class cannot extend multiple classes.',
+        },
+      ]
+
+      // Case 1: English - false claim of multiple class inheritance
+      const rawEnglish = [
+        '### Java Multiple Inheritance',
+        'Java supports multiple inheritance of classes by letting a class extend multiple classes [1].',
+        '',
+        '```java',
+        'interface Flyable { void fly(); }',
+        'interface Swimmable { void swim(); }',
+        'class Duck implements Flyable, Swimmable {',
+        '    public void fly() { System.out.println("Duck flying"); }',
+        '    public void swim() { System.out.println("Duck swimming"); }',
+        '}',
+        '```',
+      ].join('\n')
+
+      const resEnglish = service.evaluateAndFormatAnswer(rawEnglish, sources, 'english', 'Does Java support multiple inheritance?')
+      assert.equal(resEnglish.status, 'ready')
+      assert.ok(resEnglish.answer?.includes('Java does not support multiple inheritance of classes'))
+      assert.ok(resEnglish.answer?.includes('instead, Java supports implementing multiple interfaces'))
+      assert.ok(!resEnglish.answer?.includes('Java supports multiple inheritance of classes'))
+      // Code block must remain intact
+      assert.ok(resEnglish.answer?.includes('class Duck implements Flyable, Swimmable {'))
+
+      // Case 2: Hinglish - false claim of multiple class inheritance
+      const rawHinglish = 'Bhai, Java classes ka multiple inheritance support karta hai [1].'
+      const correctedHinglish = correctProgrammingInaccuracies(rawHinglish, 'hinglish')
+      assert.ok(correctedHinglish.includes('Java classes ke multiple inheritance ko support nahi karta'))
+      assert.ok(correctedHinglish.includes('multiple interfaces implement karne ki suvidha deta hai'))
+
+      // Case 3: Hindi - false claim
+      const rawHindi = 'जावा क्लासेज के मल्टीपल इनहेरिटेंस को सपोर्ट करता है [1]।'
+      const correctedHindi = correctProgrammingInaccuracies(rawHindi, 'hindi')
+      assert.ok(correctedHindi.includes('Java classes के multiple inheritance को support नहीं करता'))
+      assert.ok(correctedHindi.includes('multiple interfaces implement करने की सुविधा देता है'))
+
+      // Case 4: Already correct negative statement must be preserved untouched
+      const alreadyCorrect = 'Java does not support multiple inheritance of classes. Instead, Java supports implementing multiple interfaces [1].'
+      const preserved = correctProgrammingInaccuracies(alreadyCorrect, 'english')
+      assert.equal(preserved, alreadyCorrect)
+    })
+
+    it('should complete Java inheritance examples with a runnable main method when missing', async () => {
+      const { AIAnswerService, repairCodeBlocks } = await import('../src/services/ai.service.js')
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Java Inheritance Guide',
+          url: 'https://docs.oracle.com/java/inheritance',
+          destinationUrl: 'https://docs.oracle.com/java/inheritance',
+          domain: 'oracle.com',
+          snippet: 'Subclasses inherit superclass methods and attributes.',
+        },
+      ]
+
+      const rawAnswer = [
+        'Inheritance allows a subclass to inherit attributes and methods from a superclass using `extends` [1].',
+        '',
+        '```java',
+        'class Animal {',
+        '    void eat() {',
+        '        System.out.println("Animal eats food.");',
+        '    }',
+        '}',
+        '',
+        'class Dog extends Animal {',
+        '    void bark() {',
+        '        System.out.println("Dog barks loudly.");',
+        '    }',
+        '}',
+        '```',
+      ].join('\n')
+
+      const res = service.evaluateAndFormatAnswer(rawAnswer, sources, 'english', 'Explain Java inheritance with an example and code')
+      assert.equal(res.status, 'ready')
+      const answer = res.answer || ''
+
+      // Verifies parent class, child class with extends, and runnable main() method
+      assert.ok(answer.includes('class Animal {'))
+      assert.ok(answer.includes('class Dog extends Animal {'))
+      assert.ok(answer.includes('public static void main(String[] args) {'))
+      assert.ok(answer.includes('Dog dog = new Dog();'))
+      assert.ok(answer.includes('dog.eat();'))
+      assert.ok(answer.includes('dog.bark();'))
+
+      // Test lone stub replacement in inheritance context
+      const loneStubInInheritance = repairCodeBlocks('```java\npublic class LoneStub {\n```', 'Explain Java inheritance with code')
+      assert.ok(loneStubInInheritance.includes('class Animal {'))
+      assert.ok(loneStubInInheritance.includes('class Dog extends Animal {'))
+      assert.ok(loneStubInInheritance.includes('public static void main(String[] args) {'))
+      assert.ok(!loneStubInInheritance.includes('System.out.println("Hello, World!");'))
+    })
   })
 })
 

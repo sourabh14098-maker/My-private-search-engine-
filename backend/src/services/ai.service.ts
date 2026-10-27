@@ -337,8 +337,115 @@ export function cleanAnswerNoise(text: string): string {
  * - Completes missing closing curly braces or unclosed code fences.
  * - If source evidence is minimal, provides a short correct example rather than a broken one.
  */
-export function repairCodeBlocks(text: string): string {
+/**
+ * Ensures Java code examples are complete, demonstrate requested concepts like inheritance,
+ * and include a runnable main() method.
+ */
+function ensureRunnableJavaMain(
+  lines: string[],
+  cleanLang: string,
+  isJavaInheritanceContext: boolean
+): string[] {
+  if (cleanLang !== 'java') return lines
+
+  const joined = lines.join('\n')
+  const nonEmptyLines = lines.filter((l) => l.trim().length > 0)
+
+  // 1. Lone class header stub without body, methods, or inheritance
+  if (
+    nonEmptyLines.length <= 2 &&
+    /^\s*public\s+class\s+\w+\s*\{?\s*$/.test(nonEmptyLines[0] || '') &&
+    (nonEmptyLines.length === 1 || /^\s*\}\s*$/.test(nonEmptyLines[1] || ''))
+  ) {
+    if (isJavaInheritanceContext) {
+      return [
+        '// Parent class (Superclass)',
+        'class Animal {',
+        '    void eat() {',
+        '        System.out.println("This animal eats food.");',
+        '    }',
+        '}',
+        '',
+        '// Child class (Subclass) inheriting from Animal',
+        'class Dog extends Animal {',
+        '    void bark() {',
+        '        System.out.println("The dog barks.");',
+        '    }',
+        '}',
+        '',
+        'public class Main {',
+        '    public static void main(String[] args) {',
+        '        Dog myDog = new Dog();',
+        '        myDog.eat(); // Inherited method from Animal',
+        '        myDog.bark(); // Subclass own method',
+        '    }',
+        '}',
+      ]
+    }
+
+    const classMatch = lines.join(' ').match(/public\s+class\s+(\w+)/)
+    const className = classMatch ? classMatch[1] : 'Main'
+    return [
+      `public class ${className} {`,
+      '    public static void main(String[] args) {',
+      '        System.out.println("Hello, World!");',
+      '    }',
+      '}',
+    ]
+  }
+
+  // 2. Inheritance code block missing a runnable main() method
+  const hasInheritance = lines.some((l) => /\bclass\s+\w+\s+extends\s+\w+/.test(l))
+  const hasMain = lines.some((l) => /public\s+static\s+void\s+main/.test(l))
+
+  if (hasInheritance && !hasMain) {
+    const subClassMatch = joined.match(/\bclass\s+([A-Za-z0-9_]+)\s+extends\s+([A-Za-z0-9_]+)/)
+    if (subClassMatch) {
+      const subClass = subClassMatch[1]
+      const varName = subClass.charAt(0).toLowerCase() + subClass.slice(1)
+
+      // Find zero-argument method names defined in the classes
+      const methodMatches = [...joined.matchAll(/(?:void|[A-Za-z0-9_<>]+)\s+([a-z][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/g)].map(
+        (m) => m[1]
+      )
+      const excluded = new Set(['main', 'if', 'for', 'while', 'switch', 'catch', 'super', 'this'])
+      const methodNames = [...new Set(methodMatches.filter((m) => !excluded.has(m)))]
+      const calls = methodNames.slice(0, 3).map((m) => `        ${varName}.${m}();`)
+
+      const hasPublicClass = lines.some((l) => /public\s+class\s+\w+/.test(l))
+      const mainClassDecl = hasPublicClass ? 'class Main {' : 'public class Main {'
+
+      const mainLines = [
+        '',
+        mainClassDecl,
+        '    public static void main(String[] args) {',
+        `        ${subClass} ${varName} = new ${subClass}();`,
+        ...calls,
+        '    }',
+        '}',
+      ]
+
+      return [...lines, ...mainLines]
+    }
+  }
+
+  return lines
+}
+
+/**
+ * Repairs malformed code answers:
+ * - Ensures Java and other programming examples are complete, syntactically coherent, and in fenced code blocks.
+ * - Removes duplicate language tags (```java java -> ```java, or redundant "java" line).
+ * - Removes stray syntax fragments like `");`, `');`, broken braces, or unmatched quotes.
+ * - Completes missing closing curly braces or unclosed code fences.
+ * - If source evidence is minimal, provides a short correct example rather than a broken one.
+ */
+export function repairCodeBlocks(text: string, query?: string): string {
   if (!text) return ''
+
+  const isJavaInheritanceContext =
+    (/inheritance/i.test(query || '') || /inheritance/i.test(text)) &&
+    (/java/i.test(query || '') || /java/i.test(text))
 
   // 1. Normalize code fences with duplicated language tags on the same line: e.g. ```java java -> ```java
   let result = text.replace(/^```[ \t]*([a-zA-Z0-9_#+-]+)(?:[ \t,:]+([a-zA-Z0-9_#+-]+))+[^\r\n]*$/gm, '```$1')
@@ -393,24 +500,8 @@ export function repairCodeBlocks(text: string): string {
       }
     }
 
-    // If source evidence is a lone class header stub without body, methods, or inheritance
-    const nonEmptyLines = lines.filter((l: string) => l.trim().length > 0)
-    if (
-      cleanLang === 'java' &&
-      nonEmptyLines.length <= 2 &&
-      /^\s*public\s+class\s+\w+\s*\{?\s*$/.test(nonEmptyLines[0] || '') &&
-      (nonEmptyLines.length === 1 || /^\s*\}\s*$/.test(nonEmptyLines[1] || ''))
-    ) {
-      const classMatch = lines.join(' ').match(/public\s+class\s+(\w+)/)
-      const className = classMatch ? classMatch[1] : 'Main'
-      lines = [
-        `public class ${className} {`,
-        '    public static void main(String[] args) {',
-        '        System.out.println("Hello, World!");',
-        '    }',
-        '}',
-      ]
-    }
+    // Ensure runnable Java code and demonstrate inheritance when applicable
+    lines = ensureRunnableJavaMain(lines, cleanLang, isJavaInheritanceContext)
 
     return `\`\`\`${cleanLang}\n${lines.join('\n')}\n\`\`\``
   })
@@ -457,6 +548,8 @@ export function repairCodeBlocks(text: string): string {
       }
     }
 
+    lines = ensureRunnableJavaMain(lines, lang, isJavaInheritanceContext)
+
     result = `${beforeFence}\`\`\`${lang}\n${lines.join('\n')}\n\`\`\``
   }
 
@@ -464,6 +557,64 @@ export function repairCodeBlocks(text: string): string {
   result = result.replace(/```[ \t]*\r?\n[ \t]*["']?\s*\);?[ \t]*$/g, '```')
 
   return result
+}
+
+/**
+ * Corrects programming inaccuracies in AI synthesized answers:
+ * - Ensures Java is never described as supporting multiple inheritance of classes.
+ * - Explains that Java avoids ambiguity (such as the diamond problem) by not supporting multiple class inheritance,
+ *   and supports implementing multiple interfaces instead.
+ */
+export function correctProgrammingInaccuracies(text: string, languageStyle?: LanguageStyle): string {
+  if (!text) return ''
+
+  // Isolate fenced code blocks to ensure code identifiers/comments are never modified
+  const codeBlocks: string[] = []
+  let masked = text.replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
+    codeBlocks.push(match)
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`
+  })
+
+  const style = languageStyle || 'english'
+
+  let replacement: string
+  if (style === 'hinglish') {
+    replacement = 'Java classes ke multiple inheritance ko support nahi karta (diamond problem se bachne ke liye); balki Java multiple interfaces implement karne ki suvidha deta hai'
+  } else if (style === 'hindi') {
+    replacement = 'Java classes के multiple inheritance को support नहीं करता (diamond problem से बचने के लिए); इसके बजाय Java multiple interfaces implement करने की सुविधा देता है'
+  } else {
+    replacement = 'Java does not support multiple inheritance of classes (to avoid ambiguity like the diamond problem); instead, Java supports implementing multiple interfaces'
+  }
+
+  // Patterns that falsely assert Java supports multiple inheritance of classes
+  const falseClassInheritancePatterns = [
+    // "Java supports/allows/enables/provides multiple inheritance of classes" / "through classes" / "with classes" / "using classes"
+    /(?<!(?:not|n't|never|no|doesn't|does\s+not|cannot|won't)\s+)\b(?:Java|java)\s+(?:supports?|allows?|enables?|provides?)\s+multiple\s+inheritance\s+(?:of|through|with|using)\s+classes/gi,
+    // "Java supports/allows multiple class inheritance"
+    /(?<!(?:not|n't|never|no|doesn't|does\s+not|cannot|won't)\s+)\b(?:Java|java)\s+(?:supports?|allows?|enables?|provides?)\s+multiple\s+class\s+inheritance/gi,
+    // "multiple inheritance of classes is supported/allowed/possible in Java"
+    /(?:In\s+Java,?\s+)?multiple\s+inheritance\s+of\s+classes\s+is\s+(?:supported|allowed|possible)(?!\s+not)/gi,
+    // "Java allows/lets a class to extend multiple classes"
+    /(?<!(?:not|n't|never|no|doesn't|does\s+not|cannot|won't)\s+)\b(?:Java|java)\s+(?:allows?|lets?)\s+(?:a\s+class\s+to\s+)?(?:extend|inherit\s+from)\s+multiple\s+classes/gi,
+    // "a class in Java can extend multiple classes"
+    /(?<!(?:not|n't|never|no|cannot)\s+)\b(?:a\s+class\s+in\s+Java\s+can\s+(?:extend|inherit\s+from)\s+multiple\s+classes)/gi,
+    // Hinglish patterns
+    /(?<!(?:nahi|nahin|mat)\s+)\b(?:Java|java)\s+(?:classes\s+ka\s+multiple\s+inheritance|multiple\s+inheritance\s+of\s+classes)\s+support\s+karta\s+hai/gi,
+    /(?<!(?:nahi|nahin|mat)\s+)\b(?:Java|java)\s+(?:mein\s+)?classes\s+multiple\s+inheritance\s+support\s+karti\s+hain/gi,
+    // Hindi patterns
+    /(?<!(?:नहीं|न|मत)\s+)(?:जावा|Java)\s+(?:क्लासेज\s+के\s+मल्टीपल\s+इनहेरिटेंस\s+को|मल्टीपल\s+क्लास\s+इनहेरिटेंस\s+को)\s+सपोर्ट\s+करता\s+है/gi,
+  ]
+
+  for (const pattern of falseClassInheritancePatterns) {
+    masked = masked.replace(pattern, replacement)
+  }
+
+  // Also catch unqualified statements: "Java supports multiple inheritance." without mentioning interfaces or negation
+  const unqualifiedMultipleInheritance = /(?<!(?:not|n't|never|no|doesn't|does\s+not|cannot|won't)\s+)\b(?:Java|java)\s+(?:supports?|allows?)\s+multiple\s+inheritance\b(?!\s+(?:only\s+)?(?:through|via|by|using)\s+interfaces?)(?!\s+(?:is\s+not|is\s+unsupported))/gi
+  masked = masked.replace(unqualifiedMultipleInheritance, replacement)
+
+  // Restore code blocks
+  return masked.replace(/__CODE_BLOCK_(\d+)__/g, (_m, idx) => codeBlocks[Number(idx)] || '')
 }
 
 /**
@@ -670,6 +821,7 @@ export class AIAnswerService implements IAIAnswerService {
         '    - The user query is in Hindi (Devanagari script).',
         '    - Synthesize the entire response in fluent, natural Hindi using Devanagari script (देवनागरी लिपि).',
         '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with examples suitable for a beginner.',
+        '    - PROGRAMMING ACCURACY & INHERITANCE: प्रोग्रामिंग उदाहरण सटीक होने चाहिए। Java inheritance के लिए `extends` के साथ parent (superclass) और child (subclass) तथा runnable `main()` मेथड शामिल करें। Java classes के multiple inheritance को support नहीं करता (diamond problem से बचने के लिए); स्पष्ट करें कि Java multiple interfaces implement करने की सुविधा देता है।',
         '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords (e.g. `class`, `object`, `extends`, `function`), API names, method names, variables, commands, filenames, and URLs strictly in their original English/Latin characters.',
         '    - Keep headings, explanations, and conclusions consistently in Devanagari Hindi. Do NOT switch back to English midway.',
         '    - Do NOT translate external source titles, domain names, or URLs.',
@@ -682,6 +834,7 @@ export class AIAnswerService implements IAIAnswerService {
         '    - Synthesize the entire response in friendly, natural Hinglish using the English/Latin alphabet (e.g. "Java ek popular object-oriented programming language hai...").',
         '    - SCRIPT RULE: Do NOT use Devanagari script. Use Roman/Latin script for the entire response.',
         '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with examples suitable for a beginner. Avoid awkward translations, repetitive source snippets, irrelevant search-result text, or duplicated explanations.',
+        '    - PROGRAMMING ACCURACY & INHERITANCE: Examples must demonstrate the requested concept accurately. Java inheritance ke liye parent class aur child class `extends` ke sath use karein, aur runnable `main()` method include karein. Java multiple inheritance of classes ko support nahi karta (diamond problem se bachne ke liye); explain karein ki Java multiple interfaces implement karne ki suvidha deta hai.',
         '    - TECHNICAL PRESERVATION: Keep technical terms and programming keywords (such as `class`, `object`, `extends`, `inheritance`, `interface`, `method`, `variable`, etc.) unchanged in standard English where appropriate.',
         '    - PROGRAMMING CODE: Provide complete, runnable code examples in standard English in fenced code blocks. Never translate or modify code, Markdown links, intentional URLs, citations, or technical identifiers.',
         '    - NO SNIPPET LEAKS OR RAW URLS: Avoid raw URLs inserted into ordinary sentences. Weave facts smoothly into natural Hinglish sentences with [1], [2] citations.',
@@ -694,6 +847,7 @@ export class AIAnswerService implements IAIAnswerService {
         '11. LANGUAGE REQUIREMENT (ENGLISH):',
         '    - The user query is in English. Synthesize the answer in clear, natural English.',
         '    - EXPLANATION STYLE: Explain the concept directly, with simple examples suitable for a beginner.',
+        '    - PROGRAMMING ACCURACY & INHERITANCE: Ensure code examples accurately demonstrate the requested concept. For Java inheritance, use a parent class and a child class with `extends`, and include a runnable `main()` method. Do not describe Java as supporting multiple inheritance of classes; explain that Java supports implementing multiple interfaces instead.',
         '    - PROGRAMMING CODE: When code is requested or relevant, always provide complete, clean, runnable code examples in standard fenced code blocks.',
         '    - Retain all technical identifiers, code, and source references accurately.',
       ].join('\n')
@@ -716,9 +870,11 @@ export class AIAnswerService implements IAIAnswerService {
       '9. DIRECT ANSWER: Never begin with conversational filler, meta-announcements, or preamble such as "The retrieved search results provide information...", "Based on the search results...", "According to the snippets...", or "Here is what I found...". Jump straight into the factual answer.',
       '10. NO CONVERSATIONAL SIGN-OFFS: Never end answers with filler such as "Hope this helps!", "Let me know if you need anything else.", or similar conversational sign-offs.',
       '11. NO DUPLICATION: Do not repeat explanations, definitions, execution steps, or sentences. State each verified fact once clearly.',
-      '12. FORMATTING & CODE EXAMPLES:',
+      '12. FORMATTING, ACCURACY & CODE EXAMPLES:',
       '    - Structure complex answers with clean Markdown using headings (###), numbered steps (1. ), bullet points (- ), bold text (**key terms**), and fenced code blocks for programming questions.',
-      '    - PROGRAMMING CODE: Programming questions (such as "Explain Java inheritance with an example and code" or "...samjha aur code de") must retain complete code examples.',
+      '    - PROGRAMMING ACCURACY & CONCEPT DEMONSTRATION: Code examples must directly and accurately demonstrate the concept requested.',
+      '      * For Java inheritance: Always use a parent (superclass) and a child (subclass) with the `extends` keyword, and include a runnable `main()` method (e.g. `public class Main { public static void main(String[] args) { ... } }`) creating an instance of the subclass and invoking inherited and subclass methods.',
+      '      * JAVA MULTIPLE INHERITANCE: Do NOT describe Java as supporting multiple inheritance of classes. Java does NOT allow a class to extend multiple classes (to avoid ambiguity like the diamond problem). Explicitly explain that Java supports multiple inheritance only by implementing multiple interfaces (`implements InterfaceA, InterfaceB`).',
       '    - ALWAYS format code examples in standard fenced code blocks with a single clean language label (e.g. ```java, ```python, ```javascript). Never duplicate the language label (e.g. do NOT write ```java java or ```java followed by java on line 1).',
       '    - SYNTACTIC COHERENCE: All code examples must be complete, working, and syntactically coherent with matching quotes, properly balanced braces ({}), proper indentation, and no stray syntax fragments.',
       '    - COMPLETE EXAMPLES: Provide complete code examples with class definitions, methods, comments, and line breaks. Do NOT invent placeholder code (like empty Hello World) or remove code to shorten answers.',
@@ -734,7 +890,7 @@ export class AIAnswerService implements IAIAnswerService {
       sanitizedSnippets + contextSection,
       '</untrusted_search_results>',
       '',
-      `Synthesize a direct, factual answer grounded strictly in the provided sources without preamble, internal markers ([#operation], [#result]), filler, or duplicate statements. For programming queries, provide a beginner-friendly explanation and a complete fenced code example. For straightforward queries/arithmetic, answer concisely. Use [1], [2] citations, clean Markdown, and respond ${languagePromptSuffix}:`,
+      `Synthesize a direct, factual answer grounded strictly in the provided sources without preamble, internal markers ([#operation], [#result]), filler, or duplicate statements. For programming queries, provide a beginner-friendly explanation and an accurate, complete, runnable fenced code example (for Java inheritance, use parent/child classes with extends and a runnable main method; never claim Java supports multiple class inheritance, explain multiple interfaces instead). For straightforward queries/arithmetic, answer concisely. Use [1], [2] citations, clean Markdown, and respond ${languagePromptSuffix}:`,
     ].join('\n')
 
     const controller = new AbortController()
@@ -946,8 +1102,11 @@ export class AIAnswerService implements IAIAnswerService {
     // Clean noisy tracking query params & navigation noise leaking into answer
     cleanText = cleanAnswerNoise(cleanText)
 
+    // Ensure programming concept accuracy (e.g. Java does not support multiple inheritance of classes)
+    cleanText = correctProgrammingInaccuracies(cleanText, languageStyle)
+
     // Repair malformed programming code blocks
-    cleanText = repairCodeBlocks(cleanText)
+    cleanText = repairCodeBlocks(cleanText, query)
 
     // Strip unhelpful preamble phrases and leading raw markdown markers
     cleanText = this.stripPreamble(cleanText)
