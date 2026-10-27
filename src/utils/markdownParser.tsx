@@ -23,14 +23,14 @@ export function repairCodeBlocks(text: string): string {
   if (!text) return ''
 
   // 1. Normalize code fences with duplicated language tags on the same line: e.g. ```java java -> ```java
-  let result = text.replace(/^```[ \t]*([a-zA-Z0-9_-]+)(?:[ \t,:]+([a-zA-Z0-9_-]+))+[^\r\n]*$/gm, '```$1')
+  let result = text.replace(/^```[ \t]*([a-zA-Z0-9_#+-]+)(?:[ \t,:]+([a-zA-Z0-9_#+-]+))+[^\r\n]*$/gm, '```$1')
 
   // 2. Remove stray fragments immediately before or after code fences (e.g. `");` or `);` alone on a line)
   result = result.replace(/(?:^|\r?\n)[ \t]*(?:["']?\s*\);?|["']\s*;)[ \t]*\r?\n(?=[ \t]*```)/g, '\n')
   result = result.replace(/(```[^\r\n]*\r?\n[\s\S]*?```)[ \t]*\r?\n[ \t]*(?:["']?\s*\);?|["']\s*;)[ \t]*(?=\r?\n|$)/g, '$1')
 
   // 3. Process each code block individually
-  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)```/g
+  const codeBlockRegex = /```([a-zA-Z0-9_#+-]*)[ \t]*\r?\n([\s\S]*?)```/g
   result = result.replace(codeBlockRegex, (_match, lang, codeContent) => {
     const cleanLang = (lang || 'code').trim().toLowerCase()
     let lines = codeContent.split(/\r?\n/)
@@ -60,9 +60,11 @@ export function repairCodeBlocks(text: string): string {
     let openBraces = 0
     let closeBraces = 0
     for (const l of lines) {
-      const withoutStrings = l.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '')
-      openBraces += (withoutStrings.match(/\{/g) || []).length
-      closeBraces += (withoutStrings.match(/\}/g) || []).length
+      const withoutStringsOrComments = l
+        .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '')
+        .replace(/\/\/.*$/, '')
+      openBraces += (withoutStringsOrComments.match(/\{/g) || []).length
+      closeBraces += (withoutStringsOrComments.match(/\}/g) || []).length
     }
 
     if (openBraces > closeBraces) {
@@ -73,13 +75,13 @@ export function repairCodeBlocks(text: string): string {
       }
     }
 
-    // If source evidence is minimal/incomplete (e.g. a lone class header without body), provide a clean minimal example
+    // If source evidence is a lone class header stub without body, methods, or inheritance
     const nonEmptyLines = lines.filter((l: string) => l.trim().length > 0)
     if (
       cleanLang === 'java' &&
       nonEmptyLines.length <= 2 &&
-      nonEmptyLines.some((l: string) => /public\s+class\s+\w+/.test(l)) &&
-      !nonEmptyLines.some((l: string) => /public\s+static\s+void\s+main/.test(l))
+      /^\s*public\s+class\s+\w+\s*\{?\s*$/.test(nonEmptyLines[0] || '') &&
+      (nonEmptyLines.length === 1 || /^\s*\}\s*$/.test(nonEmptyLines[1] || ''))
     ) {
       const classMatch = lines.join(' ').match(/public\s+class\s+(\w+)/)
       const className = classMatch ? classMatch[1] : 'Main'
@@ -123,9 +125,11 @@ export function repairCodeBlocks(text: string): string {
     let openBraces = 0
     let closeBraces = 0
     for (const l of lines) {
-      const withoutStrings = l.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '')
-      openBraces += (withoutStrings.match(/\{/g) || []).length
-      closeBraces += (withoutStrings.match(/\}/g) || []).length
+      const withoutStringsOrComments = l
+        .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '')
+        .replace(/\/\/.*$/, '')
+      openBraces += (withoutStringsOrComments.match(/\{/g) || []).length
+      closeBraces += (withoutStringsOrComments.match(/\}/g) || []).length
     }
     if (openBraces > closeBraces) {
       const diff = openBraces - closeBraces
@@ -163,7 +167,7 @@ export function cleanRawMarkdown(text: string): string {
 
   // 2. Isolate code blocks during prose markdown cleaning
   const codeBlocks: string[] = []
-  cleaned = cleaned.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```/g, (match) => {
+  cleaned = cleaned.replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
     codeBlocks.push(match)
     return `__CODE_BLOCK_${codeBlocks.length - 1}__`
   })
@@ -334,7 +338,7 @@ export function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
     const trimmed = rawLine.trim()
 
     // 1. Fenced code block check (```lang or ```)
-    const codeFenceMatch = trimmed.match(/^```([a-zA-Z0-9_-]*)/)
+    const codeFenceMatch = trimmed.match(/^```([a-zA-Z0-9_#+-]*)/)
     if (codeFenceMatch) {
       if (inCodeBlock) {
         // Closing code fence

@@ -335,6 +335,82 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       assert.ok(cleaned.includes('`com/courses/config`'))
       assert.ok(cleaned.includes('String url = "com/courses/java-spring-boot-0-to-100/";'))
     })
+
+    it('should preserve complete code blocks through cleanup and Show more/Show less block structure without placeholder code', () => {
+      const input = [
+        '### Java Inheritance Explanation',
+        'Java inheritance allows a subclass to inherit attributes and methods from a superclass using extends [1].',
+        '',
+        '```java',
+        '// Base class',
+        'class Animal {',
+        '    void eat() {',
+        '        System.out.println("Eating...");',
+        '    }',
+        '}',
+        '',
+        '// Derived class',
+        'class Dog extends Animal {',
+        '    void bark() {',
+        '        System.out.println("Barking...");',
+        '    }',
+        '}',
+        '',
+        'public class Main {',
+        '    public static void main(String[] args) {',
+        '        Dog dog = new Dog();',
+        '        dog.eat();',
+        '        dog.bark();',
+        '    }',
+        '}',
+        '```',
+        '',
+        'In this hierarchy, Dog inherits eat() [2].',
+      ].join('\n')
+
+      const cleaned = cleanRawMarkdown(input)
+      // Must not invent Hello World placeholder
+      assert.ok(!cleaned.includes('System.out.println("Hello, World!");'))
+      assert.ok(cleaned.includes('class Animal {'))
+      assert.ok(cleaned.includes('class Dog extends Animal {'))
+      assert.ok(cleaned.includes('dog.eat();'))
+
+      // Parse blocks
+      const blocks = parseMarkdownBlocks(input)
+      const codeBlock = blocks.find((b) => b.type === 'code-block')
+      assert.ok(codeBlock, 'Code block must be present')
+      assert.equal(codeBlock?.language, 'java')
+      assert.ok(codeBlock?.code?.includes('class Animal {'))
+      assert.ok(codeBlock?.code?.includes('class Dog extends Animal {'))
+      assert.ok(codeBlock?.code?.includes('    void eat() {'))
+      assert.ok(codeBlock?.code?.includes('    void bark() {'))
+      assert.ok(codeBlock?.code?.includes('public static void main(String[] args) {'))
+
+      // Show more / Show less contract: all blocks remain present across toggles
+      assert.equal(blocks.length, 4) // heading, paragraph, code-block, paragraph
+      const reParsed = parseMarkdownBlocks(input)
+      assert.deepEqual(blocks, reParsed, 'Block data must be completely preserved across render states')
+    })
+
+    it('should keep citation links and intentional URLs valid in renderInlineMarkdown', () => {
+      const inline = 'Read [Spring Boot](https://spring.io/projects/spring-boot) or visit https://spring.io for docs [1], [2].'
+      const nodes = renderInlineMarkdown(inline, mockSources)
+      assert.ok(Array.isArray(nodes))
+
+      // Citations [1] and [2] rendered as clickable links to destinationUrl
+      const citeAnchors = nodes.filter(
+        (n: any) => n && typeof n === 'object' && n.key?.startsWith('cite-group')
+      )
+      assert.ok(citeAnchors.length >= 1, 'Citation group must be rendered')
+
+      // Markdown link [Spring Boot](...) rendered as anchor
+      const linkAnchor = nodes.find(
+        (n: any) => n && typeof n === 'object' && n.type === 'a' && n.props?.className === 'answer-inline-link'
+      ) as any
+      assert.ok(linkAnchor, 'Markdown link must be rendered as anchor')
+      assert.equal(linkAnchor.props.href, 'https://spring.io/projects/spring-boot')
+      assert.equal(linkAnchor.props.children, 'Spring Boot')
+    })
   })
 })
 

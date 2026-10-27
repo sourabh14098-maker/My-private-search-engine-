@@ -54,6 +54,7 @@ export function detectQueryLanguageStyle(query: string): LanguageStyle {
     'bhai', 'yaar', 'dost',
     'karna', 'karo', 'kare', 'karein', 'karta', 'karti', 'karte', 'kariye', 'kijiye',
     'dijiye', 'likhe', 'likho', 'likhna',
+    'de', 'do', 'dena', 'diyo', 'liya', 'diya', 'gaya', 'gayi', 'gaye',
     'chahiye', 'sakta', 'sakti', 'sakte',
     'hota', 'hoti', 'hote',
     'accha', 'achha', 'theek', 'thik',
@@ -62,8 +63,9 @@ export function detectQueryLanguageStyle(query: string): LanguageStyle {
     'tumhara', 'tumhari', 'hamara', 'hamari', 'aapka', 'aapki',
     'mujhe', 'tujhe', 'isse', 'usse', 'isko', 'usko',
     'nahi', 'nahin', 'mat',
-    'aise', 'waise', 'kuch', 'wala', 'wali', 'wale',
-    'milega', 'milta', 'milti'
+    'aise', 'waise', 'kuch', 'wala', 'wali', 'wale', 'waala', 'waali', 'waale',
+    'milega', 'milta', 'milti',
+    'hinglish', 'sath', 'saath'
   ])
 
   // Contextual Hindi words that might collide with English or short abbreviations
@@ -71,7 +73,8 @@ export function detectQueryLanguageStyle(query: string): LanguageStyle {
     'hai', 'hain', 'ho', 'hoon', 'hun',
     'tha', 'thi', 'the', 'hoga', 'hogi', 'hoge',
     'mein', 'me', 'ko', 'se', 'par', 'pe', 'aur', 'bhi', 'toh', 'to', 'ya', 'na',
-    'ye', 'yeh', 'wo', 'woh', 'hum', 'tum', 'aap', 'kar', 'raha', 'rahi', 'rahe'
+    'ye', 'yeh', 'wo', 'woh', 'hum', 'tum', 'aap', 'kar', 'raha', 'rahi', 'rahe',
+    'ka', 'ki', 'ke'
   ])
 
   let strongCount = 0
@@ -296,7 +299,7 @@ export function cleanAnswerNoise(text: string): string {
 
   // Isolate fenced code blocks to ensure code identifiers/punctuation are never modified
   const codeBlocks: string[] = []
-  const masked = text.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```/g, (match) => {
+  const masked = text.replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
     codeBlocks.push(match)
     return `__CODE_BLOCK_${codeBlocks.length - 1}__`
   })
@@ -338,14 +341,14 @@ export function repairCodeBlocks(text: string): string {
   if (!text) return ''
 
   // 1. Normalize code fences with duplicated language tags on the same line: e.g. ```java java -> ```java
-  let result = text.replace(/^```[ \t]*([a-zA-Z0-9_-]+)(?:[ \t,:]+([a-zA-Z0-9_-]+))+[^\r\n]*$/gm, '```$1')
+  let result = text.replace(/^```[ \t]*([a-zA-Z0-9_#+-]+)(?:[ \t,:]+([a-zA-Z0-9_#+-]+))+[^\r\n]*$/gm, '```$1')
 
   // 2. Remove stray fragments immediately before or after code fences (e.g. `");` or `);` alone on a line)
   result = result.replace(/(?:^|\r?\n)[ \t]*(?:["']?\s*\);?|["']\s*;)[ \t]*\r?\n(?=[ \t]*```)/g, '\n')
   result = result.replace(/(```[^\r\n]*\r?\n[\s\S]*?```)[ \t]*\r?\n[ \t]*(?:["']?\s*\);?|["']\s*;)[ \t]*(?=\r?\n|$)/g, '$1')
 
   // 3. Process each code block individually
-  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)```/g
+  const codeBlockRegex = /```([a-zA-Z0-9_#+-]*)[ \t]*\r?\n([\s\S]*?)```/g
   result = result.replace(codeBlockRegex, (_match, lang, codeContent) => {
     const cleanLang = (lang || 'code').trim().toLowerCase()
     let lines = codeContent.split(/\r?\n/)
@@ -375,9 +378,11 @@ export function repairCodeBlocks(text: string): string {
     let openBraces = 0
     let closeBraces = 0
     for (const l of lines) {
-      const withoutStrings = l.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '')
-      openBraces += (withoutStrings.match(/\{/g) || []).length
-      closeBraces += (withoutStrings.match(/\}/g) || []).length
+      const withoutStringsOrComments = l
+        .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '')
+        .replace(/\/\/.*$/, '')
+      openBraces += (withoutStringsOrComments.match(/\{/g) || []).length
+      closeBraces += (withoutStringsOrComments.match(/\}/g) || []).length
     }
 
     if (openBraces > closeBraces) {
@@ -388,13 +393,13 @@ export function repairCodeBlocks(text: string): string {
       }
     }
 
-    // If source evidence is minimal/incomplete (e.g. a lone class header without body), provide a clean minimal example
+    // If source evidence is a lone class header stub without body, methods, or inheritance
     const nonEmptyLines = lines.filter((l: string) => l.trim().length > 0)
     if (
       cleanLang === 'java' &&
       nonEmptyLines.length <= 2 &&
-      nonEmptyLines.some((l: string) => /public\s+class\s+\w+/.test(l)) &&
-      !nonEmptyLines.some((l: string) => /public\s+static\s+void\s+main/.test(l))
+      /^\s*public\s+class\s+\w+\s*\{?\s*$/.test(nonEmptyLines[0] || '') &&
+      (nonEmptyLines.length === 1 || /^\s*\}\s*$/.test(nonEmptyLines[1] || ''))
     ) {
       const classMatch = lines.join(' ').match(/public\s+class\s+(\w+)/)
       const className = classMatch ? classMatch[1] : 'Main'
@@ -438,9 +443,11 @@ export function repairCodeBlocks(text: string): string {
     let openBraces = 0
     let closeBraces = 0
     for (const l of lines) {
-      const withoutStrings = l.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '')
-      openBraces += (withoutStrings.match(/\{/g) || []).length
-      closeBraces += (withoutStrings.match(/\}/g) || []).length
+      const withoutStringsOrComments = l
+        .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '')
+        .replace(/\/\/.*$/, '')
+      openBraces += (withoutStringsOrComments.match(/\{/g) || []).length
+      closeBraces += (withoutStringsOrComments.match(/\}/g) || []).length
     }
     if (openBraces > closeBraces) {
       const diff = openBraces - closeBraces
@@ -463,7 +470,14 @@ export function repairCodeBlocks(text: string): string {
  * Cleans conversational sign-offs, orphaned trailing headings, and incomplete trailing fragments.
  */
 export function cleanTrailingContent(text: string): string {
-  let cleaned = (text || '').trim()
+  if (!text) return ''
+
+  // Isolate code blocks during trailing cleanup
+  const codeBlocks: string[] = []
+  let cleaned = text.trim().replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
+    codeBlocks.push(match)
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`
+  })
 
   // 1. Strip trailing conversational sign-offs / filler
   const trailingFillerPatterns = [
@@ -524,14 +538,15 @@ export function cleanTrailingContent(text: string): string {
   }
 
   // If text ends cleanly on a word after stripping a dangling connector, ensure terminating period if it was prose
-  if (cleaned && !/[.!?)"'`\]]$/.test(cleaned) && !cleaned.endsWith('```')) {
+  if (cleaned && !/[.!?)"'`\]]$/.test(cleaned) && !cleaned.endsWith('```') && !cleaned.includes('__CODE_BLOCK_')) {
     const lastLine = cleaned.split(/\r?\n/).pop()?.trim() || ''
     if (!/^[-*•+]\s+/.test(lastLine) && !/^\d+\.\s+/.test(lastLine)) {
       cleaned += '.'
     }
   }
 
-  return cleaned
+  // Restore code blocks
+  return cleaned.replace(/__CODE_BLOCK_(\d+)__/g, (_m, idx) => codeBlocks[Number(idx)] || '')
 }
 
 export class AIAnswerService implements IAIAnswerService {
@@ -654,29 +669,35 @@ export class AIAnswerService implements IAIAnswerService {
         '11. LANGUAGE REQUIREMENT (HINDI - DEVANAGARI):',
         '    - The user query is in Hindi (Devanagari script).',
         '    - Synthesize the entire response in fluent, natural Hindi using Devanagari script (देवनागरी लिपि).',
-        '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords (e.g. `class`, `function`), API names, method names, variables, commands, filenames, and URLs strictly in their original English/Latin characters.',
+        '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with examples suitable for a beginner.',
+        '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords (e.g. `class`, `object`, `extends`, `function`), API names, method names, variables, commands, filenames, and URLs strictly in their original English/Latin characters.',
         '    - Keep headings, explanations, and conclusions consistently in Devanagari Hindi. Do NOT switch back to English midway.',
         '    - Do NOT translate external source titles, domain names, or URLs.',
       ].join('\n')
-      languagePromptSuffix = 'in natural Hindi (Devanagari script) with technical terms and code in original English'
+      languagePromptSuffix = 'in natural Hindi (Devanagari script) with technical terms and complete code in original English'
     } else if (detectedStyle === 'hinglish') {
       languageRule = [
         '11. LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT):',
-        '    - The user query is in Hinglish (Hindi written using the English/Latin alphabet, e.g. "Java kya hai?", "Bhai samjha").',
+        '    - The user query is in Hinglish (Hindi written using the English/Latin alphabet, e.g. "Java kya hai?", "Bhai samjha", "code de").',
         '    - Synthesize the entire response in friendly, natural Hinglish using the English/Latin alphabet (e.g. "Java ek popular object-oriented programming language hai...").',
         '    - SCRIPT RULE: Do NOT use Devanagari script. Use Roman/Latin script for the entire response.',
-        '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords, API names, method names, variables, commands, filenames, and URLs in standard technical English.',
+        '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with examples suitable for a beginner. Avoid awkward translations, repetitive source snippets, irrelevant search-result text, or duplicated explanations.',
+        '    - TECHNICAL PRESERVATION: Keep technical terms and programming keywords (such as `class`, `object`, `extends`, `inheritance`, `interface`, `method`, `variable`, etc.) unchanged in standard English where appropriate.',
+        '    - PROGRAMMING CODE: Provide complete, runnable code examples in standard English in fenced code blocks. Never translate or modify code, Markdown links, intentional URLs, citations, or technical identifiers.',
+        '    - NO SNIPPET LEAKS OR RAW URLS: Avoid raw URLs inserted into ordinary sentences. Weave facts smoothly into natural Hinglish sentences with [1], [2] citations.',
         '    - Maintain natural Hinglish consistently across all headings, explanations, and bullet points. Do NOT switch midway.',
         '    - Do NOT translate external source titles, domain names, or URLs.',
       ].join('\n')
-      languagePromptSuffix = 'in natural Hinglish (Roman/Latin script) with technical terms and code in standard English'
+      languagePromptSuffix = 'in natural Hinglish (Roman/Latin script) with technical terms and complete code in standard English'
     } else {
       languageRule = [
         '11. LANGUAGE REQUIREMENT (ENGLISH):',
         '    - The user query is in English. Synthesize the answer in clear, natural English.',
+        '    - EXPLANATION STYLE: Explain the concept directly, with simple examples suitable for a beginner.',
+        '    - PROGRAMMING CODE: When code is requested or relevant, always provide complete, clean, runnable code examples in standard fenced code blocks.',
         '    - Retain all technical identifiers, code, and source references accurately.',
       ].join('\n')
-      languagePromptSuffix = 'in clear English'
+      languagePromptSuffix = 'in clear English with complete code examples where appropriate'
     }
 
     const systemPrompt = [
@@ -697,9 +718,10 @@ export class AIAnswerService implements IAIAnswerService {
       '11. NO DUPLICATION: Do not repeat explanations, definitions, execution steps, or sentences. State each verified fact once clearly.',
       '12. FORMATTING & CODE EXAMPLES:',
       '    - Structure complex answers with clean Markdown using headings (###), numbered steps (1. ), bullet points (- ), bold text (**key terms**), and fenced code blocks for programming questions.',
-      '    - PROGRAMMING CODE: Always format code examples in standard fenced code blocks with a single clean language label (e.g. ```java, ```python, ```javascript). Never duplicate the language label (e.g. do NOT write ```java java or ```java followed by java on line 1).',
-      '    - SYNTACTIC COHERENCE: All code examples must be complete and syntactically coherent with matching quotes, properly balanced braces ({}), and no stray syntax fragments (e.g. do NOT leave stray ");", unmatched quotes, or broken brackets).',
-      '    - MINIMAL CORRECT EXAMPLES: If source evidence is minimal or incomplete, provide a short, correct, syntactically coherent example rather than fabricating a long or broken one.',
+      '    - PROGRAMMING CODE: Programming questions (such as "Explain Java inheritance with an example and code" or "...samjha aur code de") must retain complete code examples.',
+      '    - ALWAYS format code examples in standard fenced code blocks with a single clean language label (e.g. ```java, ```python, ```javascript). Never duplicate the language label (e.g. do NOT write ```java java or ```java followed by java on line 1).',
+      '    - SYNTACTIC COHERENCE: All code examples must be complete, working, and syntactically coherent with matching quotes, properly balanced braces ({}), proper indentation, and no stray syntax fragments.',
+      '    - COMPLETE EXAMPLES: Provide complete code examples with class definitions, methods, comments, and line breaks. Do NOT invent placeholder code (like empty Hello World) or remove code to shorten answers.',
       '    - Never output orphaned markdown lines like "**" alone, empty heading lines, or "===" lines.',
       '',
       languageRule,
@@ -712,7 +734,7 @@ export class AIAnswerService implements IAIAnswerService {
       sanitizedSnippets + contextSection,
       '</untrusted_search_results>',
       '',
-      `Synthesize a direct, factual answer grounded strictly in the provided sources without preamble, internal markers ([#operation], [#result]), filler, or duplicate statements. For straightforward queries/arithmetic, answer concisely. Use [1], [2] citations, clean Markdown, and respond ${languagePromptSuffix}:`,
+      `Synthesize a direct, factual answer grounded strictly in the provided sources without preamble, internal markers ([#operation], [#result]), filler, or duplicate statements. For programming queries, provide a beginner-friendly explanation and a complete fenced code example. For straightforward queries/arithmetic, answer concisely. Use [1], [2] citations, clean Markdown, and respond ${languagePromptSuffix}:`,
     ].join('\n')
 
     const controller = new AbortController()
@@ -1143,7 +1165,7 @@ export class AIAnswerService implements IAIAnswerService {
   sanitizeCitations(text: string, sourceCount: number): string {
     // Preserve code blocks during citation sanitization
     const codeBlocks: string[] = []
-    const masked = text.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```/g, (match) => {
+    const masked = text.replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
       codeBlocks.push(match)
       return `__CODE_BLOCK_${codeBlocks.length - 1}__`
     })

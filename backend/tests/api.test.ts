@@ -2028,6 +2028,240 @@ describe('Backend Foundation API Tests', () => {
       assert.ok(res.answer?.includes('import com.example.service.UserService;'))
       assert.ok(res.answer?.includes('String endpoint = "com/courses/java-spring-boot-0-to-100/";'))
     })
+
+    it('should correctly handle English programming questions with complete fenced Java inheritance code', async () => {
+      const { AIAnswerService, detectQueryLanguageStyle } = await import('../src/services/ai.service.js')
+      const query = 'Explain Java inheritance with an example and code'
+      assert.equal(detectQueryLanguageStyle(query), 'english')
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Java Inheritance Documentation',
+          url: 'https://docs.oracle.com/javase/tutorial/java/IandI/subclasses.html',
+          destinationUrl: 'https://docs.oracle.com/javase/tutorial/java/IandI/subclasses.html',
+          domain: 'oracle.com',
+          snippet: 'A subclass inherits all the members (fields, methods, and nested classes) from its superclass.',
+        },
+        {
+          title: 'GeeksforGeeks Java Inheritance',
+          url: 'https://www.geeksforgeeks.org/inheritance-in-java/',
+          destinationUrl: 'https://www.geeksforgeeks.org/inheritance-in-java/',
+          domain: 'geeksforgeeks.org',
+          snippet: 'Inheritance in Java is a mechanism in which one object acquires all the properties and behaviors of a parent object.',
+        },
+      ]
+
+      const rawAnswer = [
+        'Inheritance in Java is an object-oriented programming concept where one class acquires the properties and methods of another class using the `extends` keyword [1].',
+        '',
+        '### Java Inheritance Example',
+        '',
+        '```java',
+        '// Base class (Superclass)',
+        'class Animal {',
+        '    void eat() {',
+        '        System.out.println("This animal eats food.");',
+        '    }',
+        '}',
+        '',
+        '// Subclass inheriting from Animal',
+        'class Dog extends Animal {',
+        '    void bark() {',
+        '        System.out.println("The dog barks.");',
+        '    }',
+        '}',
+        '',
+        'public class Main {',
+        '    public static void main(String[] args) {',
+        '        Dog myDog = new Dog();',
+        '        myDog.eat(); // Inherited method from Animal',
+        '        myDog.bark(); // Subclass own method',
+        '    }',
+        '}',
+        '```',
+        '',
+        'In this example, the `Dog` class inherits the `eat()` method from the `Animal` class, promoting code reuse [2].',
+      ].join('\n')
+
+      const res = service.evaluateAndFormatAnswer(rawAnswer, sources, 'english', query)
+
+      assert.equal(res.status, 'ready')
+      assert.equal(res.languageStyle, 'english')
+      assert.ok(res.answer?.includes('Inheritance in Java is an object-oriented programming concept'))
+      assert.ok(res.answer?.includes('`extends` keyword'))
+      assert.ok(res.answer?.includes('```java'))
+      assert.ok(res.answer?.includes('// Base class (Superclass)'))
+      assert.ok(res.answer?.includes('class Animal {'))
+      assert.ok(res.answer?.includes('class Dog extends Animal {'))
+      assert.ok(res.answer?.includes('myDog.eat(); // Inherited method from Animal'))
+      assert.ok(res.answer?.includes('public class Main {'))
+      const openBraces = (res.answer?.match(/\{/g) || []).length
+      const closeBraces = (res.answer?.match(/\}/g) || []).length
+      assert.equal(openBraces, closeBraces)
+      assert.ok(res.answer?.includes('[1]'))
+      assert.ok(res.answer?.includes('[2]'))
+    })
+
+    it('should correctly handle Roman-script Hinglish programming questions with natural Hinglish prose and complete code', async () => {
+      const { AIAnswerService, detectQueryLanguageStyle } = await import('../src/services/ai.service.js')
+      const query = 'Bhai Java kya hai? Simple Hinglish mein samjha aur code de'
+      assert.equal(detectQueryLanguageStyle(query), 'hinglish')
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Java Overview',
+          url: 'https://docs.oracle.com/en/java/',
+          destinationUrl: 'https://docs.oracle.com/en/java/',
+          domain: 'oracle.com',
+          snippet: 'Java is an object-oriented, class-based programming language.',
+        },
+      ]
+
+      const rawAnswer = [
+        'Bhai, Java ek bahut popular object-oriented programming language hai [1]. Ye secure, platform-independent aur beginner-friendly hai. Isme sara code classes aur objects ke andar likha jata hai.',
+        '',
+        '### Simple Java Code Example',
+        '',
+        '```java',
+        'public class HelloWorld {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Hello Bhai, Java seekho!");',
+        '    }',
+        '}',
+        '```',
+        '',
+        'Is program mein `main` method entry point hai jahan se execution start hota hai [1].',
+      ].join('\n')
+
+      const res = service.evaluateAndFormatAnswer(rawAnswer, sources, 'hinglish', query)
+
+      assert.equal(res.status, 'ready')
+      assert.equal(res.languageStyle, 'hinglish')
+      assert.equal(/[\u0900-\u097F]/.test(res.answer || ''), false, 'Hinglish answer must not contain Devanagari characters')
+      assert.ok(res.answer?.includes('Bhai, Java ek bahut popular object-oriented programming language hai [1].'))
+      assert.ok(res.answer?.includes('classes'))
+      assert.ok(res.answer?.includes('objects'))
+      assert.ok(res.answer?.includes('`main` method'))
+      assert.ok(res.answer?.includes('```java'))
+      assert.ok(res.answer?.includes('public class HelloWorld {'))
+      assert.ok(res.answer?.includes('System.out.println("Hello Bhai, Java seekho!");'))
+    })
+
+    it('should correctly handle Hindi Devanagari questions with natural Hindi answers in Devanagari', async () => {
+      const { AIAnswerService, detectQueryLanguageStyle } = await import('../src/services/ai.service.js')
+      const query = 'जावा क्या है? इनहेरिटेंस को कोड के साथ समझाइए'
+      assert.equal(detectQueryLanguageStyle(query), 'hindi')
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Java Overview Hindi',
+          url: 'https://example.com/hindi/java',
+          destinationUrl: 'https://example.com/hindi/java',
+          domain: 'example.com',
+          snippet: 'जावा एक ऑब्जेक्ट-ओरिएंटेड प्रोग्रामिंग भाषा है।',
+        },
+      ]
+
+      const rawAnswer = [
+        'जावा एक उच्च-स्तरीय और ऑब्जेक्ट-ओरिएंटेड प्रोग्रामिंग भाषा है [1]। इनहेरिटेंस के माध्यम से एक चाइल्ड क्लास पैरेंट क्लास के गुणों और विधियों को हासिल करती है।',
+        '',
+        '```java',
+        '// पैरेंट क्लास',
+        'class Animal {',
+        '    void sound() {',
+        '        System.out.println("Animal sound");',
+        '    }',
+        '}',
+        '',
+        '// चाइल्ड क्लास जो Animal को extends करती है',
+        'class Dog extends Animal {',
+        '    void sound() {',
+        '        System.out.println("Dog barks");',
+        '    }',
+        '}',
+        '```',
+        '',
+        'यहाँ `Dog` क्लास `Animal` क्लास को `extends` कीवर्ड की मदद से इनहेरिट करती है [1]।',
+      ].join('\n')
+
+      const res = service.evaluateAndFormatAnswer(rawAnswer, sources, 'hindi', query)
+
+      assert.equal(res.status, 'ready')
+      assert.equal(res.languageStyle, 'hindi')
+      assert.ok(/[\u0900-\u097F]/.test(res.answer || ''), 'Hindi answer must contain Devanagari script')
+      assert.ok(res.answer?.includes('जावा एक उच्च-स्तरीय और ऑब्जेक्ट-ओरिएंटेड प्रोग्रामिंग भाषा है [1]।'))
+      assert.ok(res.answer?.includes('class Animal {'))
+      assert.ok(res.answer?.includes('class Dog extends Animal {'))
+      assert.ok(res.answer?.includes('extends'))
+    })
+
+    it('should preserve code blocks through cleanup without inserting placeholder code', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Java Guide',
+          url: 'https://example.com/java-guide',
+          destinationUrl: 'https://example.com/java-guide',
+          domain: 'example.com',
+          snippet: 'Complete Java inheritance and polymorphism guide.',
+        },
+      ]
+
+      const detailedAnswerWithCode = [
+        '### Java Inheritance Overview',
+        'Inheritance allows classes to derive properties from existing classes [1].',
+        '',
+        '```java',
+        'class Vehicle {',
+        '    protected String brand = "Ford";',
+        '    public void honk() {',
+        '        System.out.println("Tuut, tuut!");',
+        '    }',
+        '}',
+        '',
+        'class Car extends Vehicle {',
+        '    private String modelName = "Mustang";',
+        '    public static void main(String[] args) {',
+        '        Car myCar = new Car();',
+        '        myCar.honk();',
+        '        System.out.println(myCar.brand + " " + myCar.modelName);',
+        '    }',
+        '}',
+        '```',
+        '',
+        'The `Car` class inherits the field `brand` and the method `honk()` from `Vehicle` [1].',
+      ].join('\n')
+
+      const res = service.evaluateAndFormatAnswer(detailedAnswerWithCode, sources, 'english', 'Java inheritance')
+      assert.equal(res.status, 'ready')
+      const cleaned = res.answer || ''
+      assert.ok(cleaned.includes('class Vehicle {'))
+      assert.ok(cleaned.includes('class Car extends Vehicle {'))
+      assert.ok(cleaned.includes('    protected String brand = "Ford";'))
+      assert.ok(cleaned.includes('System.out.println("Tuut, tuut!");'))
+      assert.ok(!cleaned.includes('System.out.println("Hello, World!");'))
+    })
   })
 })
 
