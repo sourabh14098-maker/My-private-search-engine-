@@ -7,6 +7,7 @@ import {
   correctProgrammingInaccuracies,
   repairCodeBlocks,
   isProgrammingQuery,
+  stripModelWrapperTags,
   evaluateAnswerTruncation,
   COLLAPSED_HEIGHT_PX,
   EXPANSION_THRESHOLD_PX,
@@ -626,6 +627,43 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
 
       const rendered2 = renderInlineMarkdown(blocks[1].text || '', mockSources)
       assert.ok(rendered2.some((n: any) => n && typeof n === 'object' && n.key?.startsWith('cite-group')))
+    })
+  })
+
+  describe('Raw Model Wrapper Tag Suppression (<markdown>, <think>, etc.)', () => {
+    it('should strip <markdown> and </markdown> tags without damaging markdown structure', () => {
+      const input = '<markdown>\n## Title\nParagraph text.\n</markdown>'
+      const stripped = stripModelWrapperTags(input)
+      assert.ok(!stripped.includes('<markdown>'))
+      assert.ok(!stripped.includes('</markdown>'))
+      assert.ok(stripped.includes('## Title'))
+
+      const blocks = parseMarkdownBlocks(input)
+      assert.equal(blocks[0].type, 'heading')
+      assert.equal(blocks[0].text, 'Title')
+      assert.equal(blocks[1].type, 'paragraph')
+      assert.equal(blocks[1].text, 'Paragraph text.')
+    })
+
+    it('should strip <think>...</think> reasoning blocks cleanly', () => {
+      const input = '<think>\nInternal chain of thought reasoning.\n</think>\nActual factual answer.'
+      const stripped = stripModelWrapperTags(input)
+      assert.ok(!stripped.includes('<think>'))
+      assert.ok(!stripped.includes('Internal chain of thought'))
+      assert.equal(stripped, 'Actual factual answer.')
+
+      const blocks = parseMarkdownBlocks(input)
+      assert.equal(blocks.length, 1)
+      assert.equal(blocks[0].text, 'Actual factual answer.')
+    })
+
+    it('should strip <answer>, <response>, and <untrusted_search_results> tags', () => {
+      const input = '<answer><untrusted_search_results>snippet</untrusted_search_results>Direct answer.</answer>'
+      const stripped = stripModelWrapperTags(input)
+      assert.ok(!stripped.includes('<answer>'))
+      assert.ok(!stripped.includes('</answer>'))
+      assert.ok(!stripped.includes('<untrusted_search_results>'))
+      assert.equal(stripped, 'Direct answer.')
     })
   })
 })

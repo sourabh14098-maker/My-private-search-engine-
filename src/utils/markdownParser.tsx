@@ -34,6 +34,27 @@ export function evaluateAnswerTruncation(scrollHeight: number): {
 }
 
 /**
+ * Strips raw model wrapper tags (<markdown>, </markdown>, <think>...</think>, <answer>...</answer>, etc.)
+ * that local models like Llama 3.2 emit around output or reasoning blocks.
+ */
+export function stripModelWrapperTags(text: string): string {
+  if (!text || typeof text !== 'string') return ''
+
+  return text
+    // 1. Strip reasoning/thinking blocks
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think\b[^>]*>/gi, '')
+    // 2. Strip raw <markdown>...</markdown> wrappers
+    .replace(/<\/?markdown\b[^>]*>/gi, '')
+    // 3. Strip <answer>...</answer>, <response>...</response>, <output>...</output>
+    .replace(/<\/?(?:answer|response|content|result|output)\b[^>]*>/gi, '')
+    // 4. Strip echoed <untrusted_search_results> block if any
+    .replace(/<untrusted_search_results>[\s\S]*?<\/untrusted_search_results>/gi, '')
+    .replace(/<\/?untrusted_search_results\b[^>]*>/gi, '')
+    .trim()
+}
+
+/**
  * Repairs malformed programming code answers:
  * - Ensures Java and other programming examples are complete, syntactically coherent, and in fenced code blocks.
  * - Removes duplicate language tags (```java java -> ```java, or redundant "java" line).
@@ -56,13 +77,13 @@ export function isProgrammingQuery(query?: string): boolean {
     return false
   }
 
-  // Known programming languages
+  // Known programming languages (handling c++ and c# where trailing non-word chars break \b)
   const languagePattern =
-    /\b(?:java|python|javascript|typescript|c\+\+|cpp|c#|csharp|golang|rust|ruby|php|swift|kotlin|scala|sql|html|css|bash|powershell|perl|dart|r\s+programming)\b/i
+    /\b(?:java|python|javascript|typescript|cpp|csharp|golang|rust|ruby|php|swift|kotlin|scala|sql|html|css|bash|powershell|perl|dart|r\s+programming)\b|(?:\b(?:c\+\+|c#)(?!\w))/i
 
   // Programming actions, syntax concepts, and keywords
   const actionPattern =
-    /\b(?:code|coding|program|programming|script|syntax|compile|compiler|runtime|debugging|debug|exception|stack\s*trace|algorithm|data\s+structure|regex|regular\s+expression|api|sdk|library|framework|function|method|variable|class|interface|inheritance|polymorphism|encapsulation|recursion|array|pointer|json|xml|async|await|promise|loop|import|export|react|angular|vue|node\.?js|spring\s+boot|django|flask|fastapi)\b/i
+    /\b(?:code|coding|program|programming|script|syntax|compile|compiler|runtime|debugging|debug|exception|stack\s*trace|algorithm|data\s+structure|binary\s+search|implement|implementation|regex|regular\s+expression|api|sdk|library|framework|function|method|variable|class|interface|inheritance|polymorphism|encapsulation|recursion|array|pointer|json|xml|async|await|promise|loop|import|export|react|angular|vue|node\.?js|spring\s+boot|django|flask|fastapi)\b/i
 
   // Colloquial Hinglish coding phrases
   const colloquialCodingPattern =
@@ -370,8 +391,11 @@ export function correctProgrammingInaccuracies(text: string, languageStyle?: str
 export function cleanRawMarkdown(text: string, query?: string): string {
   if (!text) return ''
 
+  // 0. Strip raw model wrapper tags (<markdown>, <think>, <answer>, etc.)
+  let cleaned = stripModelWrapperTags(text)
+
   // 1. Correct programming inaccuracies first
-  let cleaned = correctProgrammingInaccuracies(text)
+  cleaned = correctProgrammingInaccuracies(cleaned)
 
   // 2. Repair code blocks
   cleaned = repairCodeBlocks(cleaned.replace(/\r\n/g, '\n'), query).trim()

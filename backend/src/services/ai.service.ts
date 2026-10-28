@@ -32,13 +32,13 @@ export function isProgrammingQuery(query?: string): boolean {
     return false
   }
 
-  // Known programming languages
+  // Known programming languages (handling c++ and c# where trailing non-word chars break \b)
   const languagePattern =
-    /\b(?:java|python|javascript|typescript|c\+\+|cpp|c#|csharp|golang|rust|ruby|php|swift|kotlin|scala|sql|html|css|bash|powershell|perl|dart|r\s+programming)\b/i
+    /\b(?:java|python|javascript|typescript|cpp|csharp|golang|rust|ruby|php|swift|kotlin|scala|sql|html|css|bash|powershell|perl|dart|r\s+programming)\b|(?:\b(?:c\+\+|c#)(?!\w))/i
 
   // Programming actions, syntax concepts, and keywords
   const actionPattern =
-    /\b(?:code|coding|program|programming|script|syntax|compile|compiler|runtime|debugging|debug|exception|stack\s*trace|algorithm|data\s+structure|regex|regular\s+expression|api|sdk|library|framework|function|method|variable|class|interface|inheritance|polymorphism|encapsulation|recursion|array|pointer|json|xml|async|await|promise|loop|import|export|react|angular|vue|node\.?js|spring\s+boot|django|flask|fastapi)\b/i
+    /\b(?:code|coding|program|programming|script|syntax|compile|compiler|runtime|debugging|debug|exception|stack\s*trace|algorithm|data\s+structure|binary\s+search|implement|implementation|regex|regular\s+expression|api|sdk|library|framework|function|method|variable|class|interface|inheritance|polymorphism|encapsulation|recursion|array|pointer|json|xml|async|await|promise|loop|import|export|react|angular|vue|node\.?js|spring\s+boot|django|flask|fastapi)\b/i
 
   // Colloquial Hinglish coding phrases
   const colloquialCodingPattern =
@@ -205,6 +205,130 @@ export function solveSimpleArithmetic(query: string): string | null {
 
   const formattedResult = Number.isInteger(result) ? String(result) : String(Math.round(result * 1e8) / 1e8)
   return `${num1} ${op} ${num2} = ${formattedResult}`
+}
+
+export type QueryIntent =
+  | 'coding'
+  | 'math'
+  | 'biography'
+  | 'current_affairs'
+  | 'science_education'
+  | 'comparison'
+  | 'how_to'
+  | 'definition'
+  | 'general'
+
+export interface QueryAnalysis {
+  intent: QueryIntent
+  isTimeSensitive: boolean
+  languageStyle: LanguageStyle
+}
+
+/**
+ * Classifies user search query intent across general knowledge, science, education,
+ * programming, mathematics, history, biographies, current affairs, comparisons, and practical how-to.
+ */
+export function classifyQueryIntent(query?: string): QueryAnalysis {
+  if (!query || typeof query !== 'string') {
+    return { intent: 'general', isTimeSensitive: false, languageStyle: 'english' }
+  }
+
+  const trimmed = query.trim()
+  const q = trimmed.toLowerCase()
+  const languageStyle = detectQueryLanguageStyle(trimmed)
+
+  // 1. Math Intent (direct calculation or arithmetic/math keywords)
+  if (
+    solveSimpleArithmetic(trimmed) !== null ||
+    /\b(?:calculate|compute|solve|equation|integral|derivative|square\s+root|algebra|logarithm|trigonometry)\b/i.test(q) ||
+    /^[+-]?\s*[\d,]+(?:\.\d+)?\s*[+\-*x^/%]\s*[+-]?\s*[\d,]+(?:\.\d+)?\s*\??$/i.test(trimmed)
+  ) {
+    return { intent: 'math', isTimeSensitive: false, languageStyle }
+  }
+
+  // 2. Current Affairs & Time-Sensitive Intent
+  const currentOfficePatterns = /\b(?:who\s+(?:is|are)\s+(?:the\s+)?(?:current\s+)?(?:cm|chief\s+minister|prime\s+minister|pm|president|governor|mayor|ceo|chancellor|minister|cabinet))\b/i
+  const devanagariOfficePatterns = /(?:मुख्यमंत्री|प्रधानमंत्री|राष्ट्रपति|राज्यपाल|सीईओ)/
+  const temporalKeywords = /\b(?:current|currently|latest|recent|recently|breaking|live|today|this\s+year|upcoming|election|winner|champion|stock\s+price|inflation\s+rate|2025|2026)\b/i
+  const devanagariTemporal = /(?:वर्तमान|हालिया|ताज़ा|आज|चुनाव)/
+
+  const isCurrentAffairs =
+    currentOfficePatterns.test(q) ||
+    devanagariOfficePatterns.test(trimmed) ||
+    temporalKeywords.test(q) ||
+    devanagariTemporal.test(trimmed)
+
+  if (isCurrentAffairs) {
+    return { intent: 'current_affairs', isTimeSensitive: true, languageStyle }
+  }
+
+  // 3. Comparison Intent (X vs Y, differences) - evaluated before coding so queries like 'React vs Vue' classify as comparison
+  const comparisonPattern = /\b(?:vs\.?|versus|difference\s+between|differences\s+between|compare|compared\s+to|better\s+than|pros\s+and\s+cons|advantages\s+and\s+disadvantages)\b/i
+  const hinglishComparison = /\b(?:me\s+kya\s+fark|me\s+antar|fark\s+kya\s+hai)\b/i
+  const devanagariComparison = /(?:तुलना|अंतर|फर्क)/
+  if (comparisonPattern.test(q) || hinglishComparison.test(q) || devanagariComparison.test(trimmed)) {
+    return { intent: 'comparison', isTimeSensitive: false, languageStyle }
+  }
+
+  // 4. Programming / Coding Intent
+  if (isProgrammingQuery(trimmed)) {
+    return { intent: 'coding', isTimeSensitive: false, languageStyle }
+  }
+
+  // 5. How-To Intent (actionable instructions / recipes / guides)
+  const howToPattern = /\b(?:how\s+to|how\s+do\s+(?:i|we|you)|how\s+can\s+(?:i|we|one)|steps\s+to|guide\s+(?:to|for)|tutorial\s+(?:on|for)|recipe\s+for)\b/i
+  const hinglishHowTo = /\b(?:kaise\s+(?:kare|karein|karen|banaye|karega|sikhe))\b/i
+  const devanagariHowTo = /(?:कैसे\s+करें|बनाने\s+की\s+विधि|तरीका)/
+  if (howToPattern.test(q) || hinglishHowTo.test(q) || devanagariHowTo.test(trimmed)) {
+    return { intent: 'how_to', isTimeSensitive: false, languageStyle }
+  }
+
+  // 6. Biography & Person Intent ("Who is X", "Who was X", "Biography of X")
+  const biographyPattern = /\b(?:who\s+(?:is|was|were)\s+([a-zA-Z\s.'-]+)|biography\s+of|life\s+of|profile\s+of|born\s+in|died\s+in|founder\s+of|author\s+of|inventor\s+of)\b/i
+  const hinglishBio = /\b(?:kaun\s+(?:hai|tha|the))\b/i
+  const devanagariBio = /(?:कौन\s+(?:है|था|थे)|की\s+जीवनी)/
+  if (biographyPattern.test(q) || hinglishBio.test(q) || devanagariBio.test(trimmed)) {
+    return { intent: 'biography', isTimeSensitive: false, languageStyle }
+  }
+
+  // 7. Definition Intent (e.g. "What is quantum computing?", "Define inertia", excluding factual attributes like "What is the capital of...")
+  const isFactualAttribute = /\bwhat\s+is\s+(?:the\s+)?(?:capital|population|currency|height|age|birthday|net\s+worth|distance|speed|area|score|weather|temperature|price|cost|release\s+date|phone\s+number)\b/i.test(q)
+  const definitionPattern = /\b(?:what\s+is|what\s+are|define|definition\s+of|meaning\s+of|stands?\s+for|full\s+form\s+of)\b/i
+  const hinglishDef = /\b(?:kya\s+hai|kise\s+kehte\s+hain|matlab\s+kya\s+hai)\b/i
+  const devanagariDef = /(?:क्या\s+है|का\s+अर्थ|की\s+परिभाषा)/
+  if (!isFactualAttribute && (definitionPattern.test(q) || hinglishDef.test(q) || devanagariDef.test(trimmed))) {
+    return { intent: 'definition', isTimeSensitive: false, languageStyle }
+  }
+
+  // 8. Science & Education Intent (explanations, mechanisms, how/why processes)
+  const sciencePattern = /\b(?:why\s+is|why\s+do|why\s+does|how\s+does\s+.*work|what\s+causes|explain\s+(?:general\s+relativity|quantum|photosynthesis|gravity|evolution|relativity|thermodynamics)|photosynthesis|gravity|quantum|relativity|evolution|cell\s+division|mitosis|meiosis|atom|molecule|dna|rna|black\s+hole|ecosystem|plate\s+tectonics|thermodynamics|newton'?s\s+law|speed\s+of\s+light)\b/i
+  if (sciencePattern.test(q)) {
+    return { intent: 'science_education', isTimeSensitive: false, languageStyle }
+  }
+
+  // 9. General fallback
+  return { intent: 'general', isTimeSensitive: false, languageStyle }
+}
+
+/**
+ * Strips raw model wrapper tags (<markdown>, </markdown>, <think>...</think>, <answer>...</answer>, etc.)
+ * that local models like Llama 3.2 emit around output or reasoning blocks.
+ */
+export function stripModelWrapperTags(text: string): string {
+  if (!text || typeof text !== 'string') return ''
+
+  return text
+    // 1. Strip reasoning/thinking blocks
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think\b[^>]*>/gi, '')
+    // 2. Strip raw <markdown>...</markdown> wrappers
+    .replace(/<\/?markdown\b[^>]*>/gi, '')
+    // 3. Strip <answer>...</answer>, <response>...</response>, <output>...</output>
+    .replace(/<\/?(?:answer|response|content|result|output)\b[^>]*>/gi, '')
+    // 4. Strip echoed <untrusted_search_results> block if any
+    .replace(/<untrusted_search_results>[\s\S]*?<\/untrusted_search_results>/gi, '')
+    .replace(/<\/?untrusted_search_results\b[^>]*>/gi, '')
+    .trim()
 }
 
 const TRACKING_PARAMS = new Set([
@@ -844,159 +968,150 @@ export class AIAnswerService implements IAIAnswerService {
       contextSection = `\n\n[Quick Context Facts: ${cleanContextTitle}]\n${cleanContextBody}`
     }
 
-    const detectedStyle = detectQueryLanguageStyle(query)
-    const isCoding = isProgrammingQuery(query)
+    const queryAnalysis = classifyQueryIntent(query)
+    const detectedStyle = queryAnalysis.languageStyle
+    const intent = queryAnalysis.intent
+    const isCoding = intent === 'coding'
     const isJavaRequested = isCoding && /\bjava\b/i.test(query) && !/\b(?:island|indonesia|coffee)\b/i.test(query)
     const isJavaInheritanceRequested = isJavaRequested && (/\binheritance\b/i.test(query) || /इनहेरिटेंस/.test(query))
-
-    let languageRule: string
-    let languagePromptSuffix: string
-
-    if (detectedStyle === 'hindi') {
-      if (isJavaInheritanceRequested) {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (HINDI - DEVANAGARI):',
-          '    - The user query is in Hindi (Devanagari script).',
-          '    - Synthesize the entire response in fluent, natural Hindi using Devanagari script (देवनागरी लिपि).',
-          '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with examples suitable for a beginner.',
-          '    - PROGRAMMING ACCURACY & INHERITANCE: प्रोग्रामिंग उदाहरण सटीक होने चाहिए। Java inheritance के लिए `extends` के साथ parent (superclass) और child (subclass) तथा runnable `main()` मेथड शामिल करें। Java classes के multiple inheritance को support नहीं करता (diamond problem से बचने के लिए); स्पष्ट करें कि Java multiple interfaces implement करने की सुविधा देता है।',
-          '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords (e.g. `class`, `object`, `extends`, `function`), API names, method names, variables, commands, filenames, and URLs strictly in their original English/Latin characters.',
-          '    - Keep headings, explanations, and conclusions consistently in Devanagari Hindi. Do NOT switch back to English midway.',
-          '    - Do NOT translate external source titles, domain names, or URLs.',
-        ].join('\n')
-        languagePromptSuffix = 'in natural Hindi (Devanagari script) with technical terms and complete code in original English'
-      } else if (isCoding) {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (HINDI - DEVANAGARI):',
-          '    - The user query is in Hindi (Devanagari script).',
-          '    - Synthesize the entire response in fluent, natural Hindi using Devanagari script (देवनागरी लिपि).',
-          '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with programming examples where appropriate.',
-          '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords, API names, method names, variables, commands, filenames, and URLs strictly in original English.',
-          '    - Keep headings, explanations, and conclusions consistently in Devanagari Hindi. Do NOT switch back to English midway.',
-          '    - Do NOT translate external source titles, domain names, or URLs.',
-        ].join('\n')
-        languagePromptSuffix = 'in natural Hindi (Devanagari script) with technical terms and complete code in original English'
-      } else {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (HINDI - DEVANAGARI):',
-          '    - The user query is in Hindi (Devanagari script).',
-          '    - Synthesize the entire response in fluent, natural Hindi using Devanagari script (देवनागरी लिपि).',
-          '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with examples suitable for a general reader.',
-          '    - Keep headings, explanations, and conclusions consistently in Devanagari Hindi. Do NOT switch back to English midway.',
-          '    - Do NOT translate external source titles, domain names, or URLs.',
-          '    - NON-PROGRAMMING RULE: Do NOT output programming code or class definitions unless the user explicitly requested code.',
-        ].join('\n')
-        languagePromptSuffix = 'in natural Hindi (Devanagari script)'
-      }
-    } else if (detectedStyle === 'hinglish') {
-      if (isJavaInheritanceRequested) {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT):',
-          '    - The user query is in Hinglish (Hindi written using the English/Latin alphabet, e.g. "Java kya hai?", "Bhai samjha", "code de").',
-          '    - Synthesize the entire response in friendly, natural Hinglish using the English/Latin alphabet (e.g. "Java ek popular object-oriented programming language hai...").',
-          '    - SCRIPT RULE: Do NOT use Devanagari script. Use Roman/Latin script for the entire response.',
-          '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with examples suitable for a beginner. Avoid awkward translations, repetitive source snippets, irrelevant search-result text, or duplicated explanations.',
-          '    - PROGRAMMING ACCURACY & INHERITANCE: Examples must demonstrate the requested concept accurately. Java inheritance ke liye parent class aur child class `extends` ke sath use karein, aur runnable `main()` method include karein. Java multiple inheritance of classes ko support nahi karta (diamond problem se bachne ke liye); explain karein ki Java multiple interfaces implement karne ki suvidha deta hai.',
-          '    - TECHNICAL PRESERVATION: Keep technical terms and programming keywords (such as `class`, `object`, `extends`, `inheritance`, `interface`, `method`, `variable`, etc.) unchanged in standard English where appropriate.',
-          '    - PROGRAMMING CODE: Provide complete, runnable code examples in standard English in fenced code blocks. Never translate or modify code, Markdown links, intentional URLs, citations, or technical identifiers.',
-          '    - NO SNIPPET LEAKS OR RAW URLS: Avoid raw URLs inserted into ordinary sentences. Weave facts smoothly into natural Hinglish sentences with [1], [2] citations.',
-          '    - Maintain natural Hinglish consistently across all headings, explanations, and bullet points. Do NOT switch midway.',
-          '    - Do NOT translate external source titles, domain names, or URLs.',
-        ].join('\n')
-        languagePromptSuffix = 'in natural Hinglish (Roman/Latin script) with technical terms and complete code in standard English'
-      } else if (isCoding) {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT):',
-          '    - The user query is in Hinglish (Hindi written using the English/Latin alphabet, e.g. "kya hai", "kaise kare").',
-          '    - Synthesize the entire response in friendly, natural Hinglish using the English/Latin alphabet.',
-          '    - SCRIPT RULE: Do NOT use Devanagari script. Use Roman/Latin script for the entire response.',
-          '    - TECHNICAL PRESERVATION: Keep technical terms and programming keywords unchanged in standard English.',
-          '    - PROGRAMMING CODE: Provide complete, runnable code examples in standard English in fenced code blocks.',
-          '    - Maintain natural Hinglish consistently across all headings, explanations, and bullet points. Do NOT switch midway.',
-          '    - Do NOT translate external source titles, domain names, or URLs.',
-        ].join('\n')
-        languagePromptSuffix = 'in natural Hinglish (Roman/Latin script) with technical terms and complete code in standard English'
-      } else {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT):',
-          '    - The user query is in Hinglish (Hindi written using the English/Latin alphabet, e.g. "kya hai", "kaise hota hai").',
-          '    - Synthesize the entire response in friendly, natural Hinglish using the English/Latin alphabet.',
-          '    - SCRIPT RULE: Do NOT use Devanagari script. Use Roman/Latin script for the entire response.',
-          '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly. Avoid awkward translations, repetitive source snippets, or duplicated explanations.',
-          '    - Maintain natural Hinglish consistently across all headings, explanations, and bullet points. Do NOT switch midway.',
-          '    - Do NOT translate external source titles, domain names, or URLs.',
-          '    - NON-PROGRAMMING RULE: Do NOT output programming code or class definitions unless the user explicitly requested code.',
-        ].join('\n')
-        languagePromptSuffix = 'in natural Hinglish (Roman/Latin script)'
-      }
-    } else {
-      if (isJavaInheritanceRequested) {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (ENGLISH):',
-          '    - The user query is in English. Synthesize the answer in clear, natural English.',
-          '    - EXPLANATION STYLE: Explain the concept directly, with simple examples suitable for a beginner.',
-          '    - PROGRAMMING ACCURACY & INHERITANCE: Ensure code examples accurately demonstrate the requested concept. For Java inheritance, use a parent class and a child class with `extends`, and include a runnable `main()` method. Do not describe Java as supporting multiple inheritance of classes; explain that Java supports implementing multiple interfaces instead.',
-          '    - PROGRAMMING CODE: When code is requested or relevant, always provide complete, clean, runnable code examples in standard fenced code blocks.',
-          '    - Retain all technical identifiers, code, and source references accurately.',
-        ].join('\n')
-        languagePromptSuffix = 'in clear English with complete code examples where appropriate'
-      } else if (isCoding) {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (ENGLISH):',
-          '    - The user query is in English. Synthesize the answer in clear, natural English.',
-          '    - EXPLANATION STYLE: Explain the concept directly, with simple examples suitable for a beginner.',
-          '    - PROGRAMMING CODE: When code is requested or relevant, always provide complete, clean, runnable code examples in standard fenced code blocks.',
-          '    - Retain all technical identifiers, code, and source references accurately.',
-        ].join('\n')
-        languagePromptSuffix = 'in clear English with complete code examples where appropriate'
-      } else {
-        languageRule = [
-          '11. LANGUAGE REQUIREMENT (ENGLISH):',
-          '    - The user query is in English. Synthesize the answer in clear, natural English.',
-          '    - EXPLANATION STYLE: Explain the topic directly, factually, and concisely suitable for a general reader.',
-          '    - Retain all technical identifiers, proper nouns, and source references accurately.',
-          '    - NON-PROGRAMMING RULE: Do NOT output programming code or class definitions unless the user explicitly requested code.',
-        ].join('\n')
-        languagePromptSuffix = 'in clear, direct English'
-      }
-    }
-
-    const formattingRule = isCoding
-      ? [
-          '12. FORMATTING, ACCURACY & CODE EXAMPLES:',
-          '    - Structure complex answers with clean Markdown using headings (###), numbered steps (1. ), bullet points (- ), bold text (**key terms**), and fenced code blocks for programming questions.',
-          ...(isJavaInheritanceRequested
-            ? [
-                '    - PROGRAMMING ACCURACY & CONCEPT DEMONSTRATION: Code examples must directly and accurately demonstrate the concept requested.',
-                '      * For Java inheritance: Always use a parent (superclass) and a child (subclass) with the `extends` keyword, and include a runnable `main()` method (e.g. `public class Main { public static void main(String[] args) { ... } }`) creating an instance of the subclass and invoking inherited and subclass methods.',
-                '      * JAVA MULTIPLE INHERITANCE: Do NOT describe Java as supporting multiple inheritance of classes. Java does NOT allow a class to extend multiple classes (to avoid ambiguity like the diamond problem). Explicitly explain that Java supports multiple inheritance only by implementing multiple interfaces (`implements InterfaceA, InterfaceB`).',
-              ]
-            : isJavaRequested
-              ? [
-                  '    - PROGRAMMING ACCURACY: Provide complete, runnable Java code in standard fenced code blocks (```java) with class definitions and a runnable main() method where appropriate.',
-                  '    - Do not describe Java as supporting multiple inheritance of classes.',
-                ]
-              : [
-                  '    - PROGRAMMING ACCURACY: When code is requested or relevant, always provide complete, clean, runnable code examples in standard fenced code blocks with appropriate language labels.',
-                ]),
-          '    - ALWAYS format code examples in standard fenced code blocks with a single clean language label (e.g. ```java, ```python, ```javascript). Never duplicate the language label (e.g. do NOT write ```java java or ```java followed by java on line 1).',
-          '    - SYNTACTIC COHERENCE: All code examples must be complete, working, and syntactically coherent with matching quotes, properly balanced braces ({}), proper indentation, and no stray syntax fragments.',
-          '    - COMPLETE EXAMPLES: Provide complete code examples with class definitions, methods, comments, and line breaks. Do NOT invent placeholder code (like empty Hello World) or remove code to shorten answers.',
-          '    - Never output orphaned markdown lines like "**" alone, empty heading lines, or "===" lines.',
-        ].join('\n')
-      : [
-          '12. FORMATTING & ACCURACY:',
-          '    - Structure complex answers with clean Markdown using headings (###), numbered steps (1. ), bullet points (- ), and bold text (**key terms**).',
-          '    - Focus purely on direct factual explanation of the topic asked.',
-          '    - NON-PROGRAMMING RULE: Do NOT generate programming code blocks, class definitions, or programming tutorials unless the query is explicitly asking for programming or code.',
-          '    - Never output orphaned markdown lines like "**" alone, empty heading lines, or "===" lines.',
-        ].join('\n')
 
     const currentDate = new Date().toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
     })
+
+    // 1. Build Intent-Adaptive Instruction Rule
+    let intentRule = ''
+    switch (intent) {
+      case 'math':
+        intentRule = [
+          '12. INTENT GUIDELINE: MATHEMATICS & CALCULATION:',
+          '    - Provide the exact calculation result immediately.',
+          '    - If helpful, include a concise 1-2 line derivation or formula.',
+          '    - For pure arithmetic, do not cite external sources.',
+          '    - NON-PROGRAMMING: Do not output programming code or scripts.',
+        ].join('\n')
+        break
+      case 'biography':
+        intentRule = [
+          '12. INTENT GUIDELINE: BIOGRAPHY & PERSON IDENTITY:',
+          '    - Ground identity strictly in the provided search results.',
+          '    - Clearly identify who the person is, their primary profession or notability, and key achievements.',
+          '    - If the name refers to multiple notable individuals, clarify the distinction rather than confusing them.',
+          '    - NON-PROGRAMMING: Do not output programming code or class definitions.',
+        ].join('\n')
+        break
+      case 'current_affairs':
+        intentRule = [
+          '12. INTENT GUIDELINE: CURRENT AFFAIRS & TIME-SENSITIVE KNOWLEDGE:',
+          `    - TEMPORAL ANCHOR: Today's reference date is ${currentDate}.`,
+          '    - Prioritize recent, reputable sources and current office holders.',
+          '    - If search results conflict or do not establish the current state, state the uncertainty clearly.',
+          '    - NON-PROGRAMMING: Do not output programming code or class definitions.',
+        ].join('\n')
+        break
+      case 'science_education':
+        intentRule = [
+          '12. INTENT GUIDELINE: SCIENCE & EDUCATIONAL EXPLANATION:',
+          '    - Provide a clear, logically structured explanation grounded in established scientific principles.',
+          '    - Define technical terms simply when introduced.',
+          '    - Use simple real-world analogies only when they improve understanding.',
+          '    - NON-PROGRAMMING: Do not output programming code or class definitions.',
+        ].join('\n')
+        break
+      case 'comparison':
+        intentRule = [
+          '12. INTENT GUIDELINE: COMPARISON & ANALYSIS:',
+          '    - Provide an objective, structured comparison across key dimensions (purpose, pros/cons, key differences).',
+          '    - Use bullet points or a concise breakdown to make contrasts immediately clear.',
+          '    - NON-PROGRAMMING: Do not output programming code unless comparing programming languages or code syntax.',
+        ].join('\n')
+        break
+      case 'how_to':
+        intentRule = [
+          '12. INTENT GUIDELINE: PRACTICAL HOW-TO & INSTRUCTIONS:',
+          '    - Provide clear, actionable, numbered step-by-step instructions in logical chronological order.',
+          '    - Mention prerequisites or essential cautions where applicable.',
+          '    - NON-PROGRAMMING: Do not output code unless the user asked how to write code or run a technical command.',
+        ].join('\n')
+        break
+      case 'definition':
+        intentRule = [
+          '12. INTENT GUIDELINE: DEFINITION & CORE CONCEPT:',
+          '    - Begin immediately with a direct, comprehensive definition in the first sentence.',
+          '    - Follow with key characteristics, scope, or essential context.',
+          '    - NON-PROGRAMMING: Do not output programming code or class definitions.',
+        ].join('\n')
+        break
+      case 'coding':
+        intentRule = [
+          '12. INTENT GUIDELINE: PROGRAMMING & SOFTWARE ENGINEERING:',
+          '    - Structure complex answers with clean Markdown using headings (###), numbered steps, bullet points, and fenced code blocks.',
+          '    - When code is requested or necessary, provide complete, clean, runnable code examples in standard fenced code blocks with appropriate language labels (```java, ```python, etc.).',
+          ...(isJavaInheritanceRequested
+            ? [
+                '    - JAVA INHERITANCE: Always use a parent (superclass) and child (subclass) with `extends`, and include a runnable `main()` method creating an instance and calling methods.',
+                '    - JAVA MULTIPLE INHERITANCE: Do NOT describe Java as supporting multiple inheritance of classes (to avoid ambiguity like diamond problem). Explicitly explain that Java supports multiple inheritance only by implementing multiple interfaces (`implements InterfaceA, InterfaceB`).',
+              ]
+            : isJavaRequested
+              ? [
+                  '    - JAVA ACCURACY: Provide complete, runnable Java code with class definitions and a runnable main() method where appropriate.',
+                  '    - Do not describe Java as supporting multiple inheritance of classes.',
+                ]
+              : [
+                  '    - Provide complete code examples with class definitions, methods, comments, and line breaks. Do NOT invent placeholder code.',
+                ]),
+          '    - Never duplicate the language label (e.g. do NOT write ```java java).',
+          '    - All code examples must be syntactically coherent with matching quotes and properly balanced braces ({}).',
+        ].join('\n')
+        break
+      default:
+        intentRule = [
+          '12. INTENT GUIDELINE: GENERAL KNOWLEDGE & DIRECT ANSWER:',
+          '    - Structure complex answers with clean Markdown using headings (###), numbered steps (1. ), bullet points (- ), and bold text (**key terms**).',
+          '    - Focus purely on direct factual explanation of the topic asked.',
+          '    - NON-PROGRAMMING RULE: Do NOT generate programming code blocks, class definitions, or programming tutorials.',
+        ].join('\n')
+        break
+    }
+
+    // 2. Build Language-Specific Instruction Rule
+    let languageRule: string
+    let languagePromptSuffix: string
+
+    if (detectedStyle === 'hindi') {
+      languageRule = [
+        '13. LANGUAGE REQUIREMENT (HINDI - DEVANAGARI):',
+        '    - The user query is in Hindi (Devanagari script).',
+        '    - Synthesize the entire response in fluent, natural Hindi using Devanagari script (देवनागरी लिपि).',
+        '    - EXPLANATION STYLE: Explain concepts directly, simply, and clearly with examples suitable for the query.',
+        '    - TECHNICAL PRESERVATION: Retain all programming code, code snippets, keywords (e.g. `class`, `function`), API names, method names, variables, commands, filenames, and URLs strictly in their original English/Latin characters.',
+        '    - Keep headings, explanations, and conclusions consistently in Devanagari Hindi. Do NOT switch back to English midway.',
+        '    - Do NOT translate external source titles, domain names, or URLs.',
+      ].join('\n')
+      languagePromptSuffix = 'in natural Hindi (Devanagari script)' + (isCoding ? ' with technical terms and complete code in original English' : '')
+    } else if (detectedStyle === 'hinglish') {
+      languageRule = [
+        '13. LANGUAGE REQUIREMENT (HINGLISH - ROMAN SCRIPT):',
+        '    - The user query is in Hinglish (Hindi written using the English/Latin alphabet, e.g. "kya hai", "kaise kare", "samjhao").',
+        '    - Synthesize the entire response in friendly, natural Hinglish using the English/Latin alphabet.',
+        '    - SCRIPT RULE: Do NOT use Devanagari script. Use Roman/Latin script for the entire response.',
+        '    - TECHNICAL PRESERVATION: Keep technical terms and programming keywords unchanged in standard English.',
+        '    - PROGRAMMING CODE: When code is appropriate, provide complete, runnable code examples in standard English in fenced code blocks.',
+        '    - Maintain natural Hinglish consistently across all headings, explanations, and bullet points. Do NOT switch midway.',
+        '    - Do NOT translate external source titles, domain names, or URLs.',
+      ].join('\n')
+      languagePromptSuffix = 'in natural Hinglish (Roman/Latin script)' + (isCoding ? ' with technical terms and complete code in standard English' : '')
+    } else {
+      languageRule = [
+        '13. LANGUAGE REQUIREMENT (ENGLISH):',
+        '    - The user query is in English. Synthesize the answer in clear, natural English.',
+        '    - EXPLANATION STYLE: Explain the topic directly, factually, and concisely suitable for a general reader.',
+        '    - Retain all technical identifiers, proper nouns, and source references accurately.',
+      ].join('\n')
+      languagePromptSuffix = 'in clear, direct English' + (isCoding ? ' with complete code examples where appropriate' : '')
+    }
 
     const systemPrompt = [
       'You are DitchX Search Synthesizer, an AI assistant dedicated to factual, concise answer synthesis for a privacy-first search engine.',
@@ -1011,12 +1126,13 @@ export class AIAnswerService implements IAIAnswerService {
       '4. GROUNDING & SOURCE CITATIONS: Rely ONLY on verifiable facts explicitly stated in the snippets. NEVER fabricate citations or claim a source supports a statement unless the source text actually states it. Cite sources using bracketed numbers like [1], [2] corresponding strictly to the numbered sources provided.',
       '5. ARITHMETIC & DIRECT ANSWERS: For straightforward factual questions, basic definitions, or arithmetic (e.g. "What is 2 + 2?"), provide a direct, concise answer (e.g. "2 + 2 = 4.") without filler, preamble, conversational disclaimers, or excessive elaboration. For arithmetic, do not cite external sources.',
       '6. NO INTERNAL ANNOTATIONS: Do NOT output internal scratchpad markers, tool tags, or metadata tokens such as [#operation], [#result], [#step], or similar artifacts.',
-      '7. If and ONLY if the search snippets contain NO relevant information to answer the question, state: "The retrieved search results do not contain enough verified information to answer this question." Do NOT append this sentence or any disclaimers if you have answered the question.',
-      '8. Output plain text or markdown bullets only. Do not output raw HTML tags or contradictory disclaimers.',
+      '7. NO XML OR WRAPPER TAGS: NEVER wrap your answer in XML or markdown wrapper tags such as <markdown>, </markdown>, <think>, <answer>, or <response>. Output clean text/markdown directly.',
+      '8. INSUFFICIENT EVIDENCE: If and ONLY if the search snippets contain NO relevant information to answer the question, state: "The retrieved search results do not contain enough verified information to answer this question." Do NOT append this sentence or any disclaimers if you have answered the question.',
       '9. DIRECT ANSWER: Never begin with conversational filler, meta-announcements, or preamble such as "The retrieved search results provide information...", "Based on the search results...", "According to the snippets...", or "Here is what I found...". Jump straight into the factual answer.',
       '10. NO CONVERSATIONAL SIGN-OFFS: Never end answers with filler such as "Hope this helps!", "Let me know if you need anything else.", or similar conversational sign-offs.',
       '11. NO DUPLICATION: Do not repeat explanations, definitions, execution steps, or sentences. State each verified fact once clearly.',
-      formattingRule,
+      '',
+      intentRule,
       '',
       languageRule,
     ].join('\n')
@@ -1035,7 +1151,7 @@ export class AIAnswerService implements IAIAnswerService {
       sanitizedSnippets + contextSection,
       '</untrusted_search_results>',
       '',
-      `Synthesize a direct, factual answer grounded strictly in the provided sources without preamble, internal markers ([#operation], [#result]), filler, or duplicate statements.${codingGuidance} For straightforward queries/arithmetic, answer concisely. Use [1], [2] citations, clean Markdown, and respond ${languagePromptSuffix}:`,
+      `Synthesize a direct, factual answer grounded strictly in the provided sources without preamble, XML wrapper tags, internal markers ([#operation], [#result]), filler, or duplicate statements.${codingGuidance} For straightforward queries/arithmetic, answer concisely. Use [1], [2] citations, clean Markdown, and respond ${languagePromptSuffix}:`,
     ].join('\n')
 
     const controller = new AbortController()
@@ -1239,7 +1355,8 @@ export class AIAnswerService implements IAIAnswerService {
     }
 
     // Strip any trailing disclaimer mistakenly appended to a valid answer
-    let cleanText = trimmed
+    // and strip any raw model wrapper tags (<markdown>, <think>, etc.)
+    let cleanText = stripModelWrapperTags(trimmed)
     while (trailingDisclaimerRegex.test(cleanText)) {
       cleanText = cleanText.replace(trailingDisclaimerRegex, '').trim()
     }
@@ -1270,6 +1387,9 @@ export class AIAnswerService implements IAIAnswerService {
 
     // Clean trailing conversational filler, orphaned headings, and incomplete dangling fragments
     cleanText = cleanTrailingContent(cleanText)
+
+    // Final wrapper cleanup
+    cleanText = stripModelWrapperTags(cleanText)
 
     // Check if what remains is a substantive answer (at least 3 non-citation characters)
     const substantive = cleanText
@@ -1309,7 +1429,7 @@ export class AIAnswerService implements IAIAnswerService {
       /^(?:Here\s+(?:is|are)\s+(?:the\s+)?(?:summary|information|details|facts|answers?)\s+(?:from|based on)?\s*(?:the\s+)?(?:search\s+)?(?:results|snippets)?[,:]?\s*)+/i,
     ]
 
-    let cleaned = text.trim()
+    let cleaned = stripModelWrapperTags(text)
 
     // Repeatedly clean leading standalone markdown artifact lines and preamble phrases
     let changed = true

@@ -183,7 +183,9 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
             <span className="answer-status-pill error">SYNTHESIS ERROR</span>
           )}
           {status === 'ready' && (
-            <span className="answer-status-pill ready">VERIFIED SYNTHESIS</span>
+            <span className="answer-status-pill ready" title="AI synthesis grounded in retrieved search results">
+              AI SYNTHESIS
+            </span>
           )}
         </div>
       </div>

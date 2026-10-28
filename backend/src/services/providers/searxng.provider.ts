@@ -10,7 +10,7 @@ import type {
   QuickContextData,
   AIAnswerData,
 } from '../../types/api.js'
-import { aiAnswerService } from '../ai.service.js'
+import { aiAnswerService, classifyQueryIntent } from '../ai.service.js'
 
 export interface SearxngResultItem {
   title?: string
@@ -104,11 +104,14 @@ export function canonicalizeUrl(rawUrl?: string): string {
  * - Multi-engine consensus bonus (when multiple engines return the same result)
  * - Exact and token matches in the title
  * - Query token matches in snippet / content
+ * - Domain authority boost (official government, educational, encyclopedic, primary sources)
+ * - Freshness and recency boost for time-sensitive queries
  */
 export function calculateResultRelevance(
   item: SearxngResultItem,
   queryTokens: string[],
-  cleanQuery: string
+  cleanQuery: string,
+  isTimeSensitive = false
 ): number {
   let score = typeof item.score === 'number' && !Number.isNaN(item.score) ? item.score : 1.0
 
@@ -121,6 +124,7 @@ export function calculateResultRelevance(
 
   const titleLower = (item.title || '').toLowerCase()
   const contentLower = (item.content || item.snippet || '').toLowerCase()
+  const urlLower = (item.url || '').toLowerCase()
 
   if (cleanQuery && titleLower.includes(cleanQuery)) {
     score += 2.5
@@ -132,6 +136,36 @@ export function calculateResultRelevance(
     }
     if (contentLower.includes(token)) {
       score += 0.2
+    }
+  }
+
+  // 1. Domain Authority Boost (official government, educational, encyclopedic, primary sources)
+  if (/\b(?:gov|mil)(?:\.[a-z]{2,3})?\b/i.test(urlLower) || /\.gov\//i.test(urlLower)) {
+    score += 1.5 // Official government sources
+  } else if (/\b(?:edu|ac)(?:\.[a-z]{2,3})?\b/i.test(urlLower) || /\.edu\//i.test(urlLower)) {
+    score += 1.2 // Educational and academic institutions
+  } else if (urlLower.includes('wikipedia.org') || urlLower.includes('britannica.com')) {
+    score += 1.0 // Established encyclopedic references
+  } else if (
+    urlLower.includes('docs.') ||
+    urlLower.includes('developer.') ||
+    urlLower.includes('github.com') ||
+    urlLower.includes('nature.com') ||
+    urlLower.includes('science.org')
+  ) {
+    score += 0.8 // Primary documentation and science publications
+  }
+
+  // 2. Freshness & Recency Boost (for time-sensitive or current affairs queries)
+  if (isTimeSensitive) {
+    const pubDate = String(item.publishedDate || item.pubdate || '').toLowerCase()
+    const currentYear = new Date().getFullYear().toString()
+    const lastYear = (new Date().getFullYear() - 1).toString()
+
+    if (pubDate.includes(currentYear) || titleLower.includes(currentYear) || contentLower.includes(currentYear)) {
+      score += 1.5 // Current year recency bonus
+    } else if (pubDate.includes(lastYear) || titleLower.includes(lastYear)) {
+      score += 0.75 // Recent year bonus
     }
   }
 
@@ -178,6 +212,7 @@ export function normalizeSearxngWebResults(
 ): WebSearchResult[] {
   const cleanQuery = (query || '').toLowerCase().trim()
   const queryTokens = cleanQuery.split(/\s+/).filter((t) => t.length > 2)
+  const isTimeSensitive = cleanQuery ? classifyQueryIntent(cleanQuery).isTimeSensitive : false
 
   const dedupMap = new Map<string, { item: SearxngResultItem; engines: Set<string>; calculatedScore: number }>()
 
@@ -190,7 +225,7 @@ export function normalizeSearxngWebResults(
       ? item.engines
       : item.engine ? [item.engine] : []
 
-    const relScore = calculateResultRelevance(item, queryTokens, cleanQuery)
+    const relScore = calculateResultRelevance(item, queryTokens, cleanQuery, isTimeSensitive)
 
     const existing = dedupMap.get(canonical)
     if (existing) {
