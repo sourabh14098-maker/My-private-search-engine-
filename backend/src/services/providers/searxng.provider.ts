@@ -3,6 +3,9 @@ import { AppError } from '../../middleware/errorHandler.js'
 import type {
   SearchApiResponse,
   WebSearchResult,
+  NewsResult,
+  ImageResult,
+  VideoResult,
   SearchVertical,
   QuickContextData,
   AIAnswerData,
@@ -20,6 +23,13 @@ export interface SearxngResultItem {
   pubdate?: string
   category?: string
   score?: number
+  img_src?: string
+  thumbnail_src?: string
+  thumbnail?: string
+  source?: string
+  width?: number
+  height?: number
+  length?: string
   [key: string]: unknown
 }
 
@@ -45,6 +55,87 @@ export interface SearxngRawResponse {
   suggestions?: string[]
   unresponsive_engines?: unknown[]
   [key: string]: unknown
+}
+
+/**
+ * Canonicalizes a URL for deduplication by:
+ * - Lowercasing protocol and hostname
+ * - Stripping www.
+ * - Stripping standard ports (:80, :443)
+ * - Removing common tracking query parameters (utm_*, gclid, fbclid, ref, etc.)
+ * - Removing URL hash fragments (#)
+ * - Normalizing trailing slash on pathnames
+ */
+export function canonicalizeUrl(rawUrl?: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return ''
+  try {
+    const parsed = new URL(rawUrl.trim())
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '')
+    if ((parsed.protocol === 'http:' && parsed.port === '80') || (parsed.protocol === 'https:' && parsed.port === '443')) {
+      parsed.port = ''
+    }
+    const trackingExact = new Set(['gclid', 'fbclid', 'ref', 'source', 'v', '_ga', 'ncid', 'msclkid'])
+    const toDelete: string[] = []
+    parsed.searchParams.forEach((_val, key) => {
+      const lower = key.toLowerCase()
+      if (trackingExact.has(lower) || lower.startsWith('utm_') || lower.startsWith('mc_')) {
+        toDelete.push(key)
+      }
+    })
+    for (const k of toDelete) {
+      parsed.searchParams.delete(k)
+    }
+    parsed.hash = ''
+    let pathname = parsed.pathname
+    if (pathname.length > 1 && pathname.endsWith('/')) {
+      pathname = pathname.slice(0, -1)
+    }
+    parsed.pathname = pathname
+    const search = parsed.searchParams.toString()
+    return `${parsed.protocol}//${host}${parsed.pathname}${search ? '?' + search : ''}`
+  } catch {
+    return rawUrl.trim().toLowerCase()
+  }
+}
+
+/**
+ * Calculates a composite relevance score for ranking SearXNG results:
+ * - SearXNG engine score
+ * - Multi-engine consensus bonus (when multiple engines return the same result)
+ * - Exact and token matches in the title
+ * - Query token matches in snippet / content
+ */
+export function calculateResultRelevance(
+  item: SearxngResultItem,
+  queryTokens: string[],
+  cleanQuery: string
+): number {
+  let score = typeof item.score === 'number' && !Number.isNaN(item.score) ? item.score : 1.0
+
+  const engineCount = Array.isArray(item.engines) && item.engines.length > 0
+    ? item.engines.length
+    : item.engine ? 1 : 1
+  if (engineCount > 1) {
+    score += (engineCount - 1) * 0.75
+  }
+
+  const titleLower = (item.title || '').toLowerCase()
+  const contentLower = (item.content || item.snippet || '').toLowerCase()
+
+  if (cleanQuery && titleLower.includes(cleanQuery)) {
+    score += 2.5
+  }
+
+  for (const token of queryTokens) {
+    if (titleLower.includes(token)) {
+      score += 0.8
+    }
+    if (contentLower.includes(token)) {
+      score += 0.2
+    }
+  }
+
+  return score
 }
 
 export function normalizeSearxngInfobox(rawInfobox?: SearxngInfoboxItem): QuickContextData | undefined {
@@ -81,8 +172,53 @@ export function normalizeSearxngInfobox(rawInfobox?: SearxngInfoboxItem): QuickC
   }
 }
 
-export function normalizeSearxngWebResults(rawResults: SearxngResultItem[]): WebSearchResult[] {
-  return rawResults.map((item, index) => {
+export function normalizeSearxngWebResults(
+  rawResults: SearxngResultItem[],
+  query?: string
+): WebSearchResult[] {
+  const cleanQuery = (query || '').toLowerCase().trim()
+  const queryTokens = cleanQuery.split(/\s+/).filter((t) => t.length > 2)
+
+  const dedupMap = new Map<string, { item: SearxngResultItem; engines: Set<string>; calculatedScore: number }>()
+
+  for (let i = 0; i < rawResults.length; i++) {
+    const item = rawResults[i]
+    if (!item || typeof item !== 'object') continue
+    const canonical = item.url ? canonicalizeUrl(item.url) : `__empty_entry_${i}`
+
+    const itemEngines = Array.isArray(item.engines) && item.engines.length > 0
+      ? item.engines
+      : item.engine ? [item.engine] : []
+
+    const relScore = calculateResultRelevance(item, queryTokens, cleanQuery)
+
+    const existing = dedupMap.get(canonical)
+    if (existing) {
+      for (const e of itemEngines) existing.engines.add(e)
+      existing.calculatedScore += 0.75
+      const existingDesc = existing.item.content || existing.item.snippet || ''
+      const newDesc = item.content || item.snippet || ''
+      if (newDesc.length > existingDesc.length) {
+        existing.item.content = newDesc
+      }
+      if (relScore > existing.calculatedScore) {
+        existing.calculatedScore = relScore
+      }
+    } else {
+      dedupMap.set(canonical, {
+        item: { ...item },
+        engines: new Set(itemEngines),
+        calculatedScore: relScore,
+      })
+    }
+  }
+
+  const sortedEntries = cleanQuery
+    ? Array.from(dedupMap.values()).sort((a, b) => b.calculatedScore - a.calculatedScore)
+    : Array.from(dedupMap.values())
+
+  return sortedEntries.map((entry, index) => {
+    const item = entry.item
     let domain = ''
     if (item.url) {
       try {
@@ -95,10 +231,10 @@ export function normalizeSearxngWebResults(rawResults: SearxngResultItem[]): Web
     const title = (item.title || 'Untitled').trim()
     const description = (item.content || item.snippet || '').trim()
 
-    // Determine metadata / engine attribution
+    const enginesArray = Array.from(entry.engines)
     let metadata = 'Web'
-    if (Array.isArray(item.engines) && item.engines.length > 0) {
-      metadata = item.engines.join(', ')
+    if (enginesArray.length > 0) {
+      metadata = enginesArray.join(', ')
     } else if (item.engine) {
       metadata = item.engine
     } else if (domain) {
@@ -123,6 +259,196 @@ export function normalizeSearxngWebResults(rawResults: SearxngResultItem[]): Web
   })
 }
 
+export function normalizeSearxngNewsResults(
+  rawResults: SearxngResultItem[],
+  query?: string
+): NewsResult[] {
+  const cleanQuery = (query || '').toLowerCase().trim()
+  const queryTokens = cleanQuery.split(/\s+/).filter((t) => t.length > 2)
+
+  const dedupMap = new Map<string, { item: SearxngResultItem; engines: Set<string>; calculatedScore: number }>()
+
+  for (const item of rawResults) {
+    if (!item || !item.url) continue
+    const canonical = canonicalizeUrl(item.url)
+    if (!canonical) continue
+
+    const itemEngines = Array.isArray(item.engines) && item.engines.length > 0
+      ? item.engines
+      : item.engine ? [item.engine] : []
+
+    const relScore = calculateResultRelevance(item, queryTokens, cleanQuery)
+
+    const existing = dedupMap.get(canonical)
+    if (existing) {
+      for (const e of itemEngines) existing.engines.add(e)
+      existing.calculatedScore += 0.75
+      const existingDesc = existing.item.content || existing.item.snippet || ''
+      const newDesc = item.content || item.snippet || ''
+      if (newDesc.length > existingDesc.length) {
+        existing.item.content = newDesc
+      }
+    } else {
+      dedupMap.set(canonical, {
+        item: { ...item },
+        engines: new Set(itemEngines),
+        calculatedScore: relScore,
+      })
+    }
+  }
+
+  const sortedEntries = Array.from(dedupMap.values()).sort((a, b) => b.calculatedScore - a.calculatedScore)
+
+  return sortedEntries.map((entry, index) => {
+    const item = entry.item
+    let domain = ''
+    if (item.url) {
+      try {
+        domain = new URL(item.url).hostname.replace(/^www\./, '')
+      } catch {
+        domain = ''
+      }
+    }
+
+    const enginesArray = Array.from(entry.engines)
+    const publisher = domain || (enginesArray.length > 0 ? enginesArray.join(', ') : item.engine) || 'News'
+    const headline = (item.title || 'Untitled Article').trim()
+    const description = (item.content || item.snippet || '').trim()
+    const imageUrl = typeof item.img_src === 'string'
+      ? item.img_src
+      : typeof item.thumbnail === 'string'
+      ? item.thumbnail
+      : undefined
+
+    return {
+      id: `searxng-news-${index + 1}`,
+      headline,
+      publisher,
+      timestamp: item.publishedDate || item.pubdate || 'Recent',
+      description,
+      imageUrl,
+      destinationUrl: item.url || '',
+    }
+  })
+}
+
+export function normalizeSearxngImageResults(
+  rawResults: SearxngResultItem[],
+  query?: string
+): ImageResult[] {
+  const cleanQuery = (query || '').toLowerCase().trim()
+  const queryTokens = cleanQuery.split(/\s+/).filter((t) => t.length > 2)
+
+  const dedupMap = new Map<string, { item: SearxngResultItem; calculatedScore: number }>()
+
+  for (const item of rawResults) {
+    if (!item) continue
+    const imgUrl = (typeof item.img_src === 'string' && item.img_src)
+      ? item.img_src
+      : (typeof item.thumbnail_src === 'string' && item.thumbnail_src)
+      ? item.thumbnail_src
+      : item.url
+    if (!imgUrl) continue
+
+    const canonical = canonicalizeUrl(imgUrl)
+    if (!canonical) continue
+
+    const relScore = calculateResultRelevance(item, queryTokens, cleanQuery)
+    if (!dedupMap.has(canonical)) {
+      dedupMap.set(canonical, { item, calculatedScore: relScore })
+    }
+  }
+
+  const sortedEntries = Array.from(dedupMap.values()).sort((a, b) => b.calculatedScore - a.calculatedScore)
+
+  return sortedEntries.map((entry, index) => {
+    const item = entry.item
+    let domain = ''
+    const pageUrl = item.url || ''
+    if (pageUrl) {
+      try {
+        domain = new URL(pageUrl).hostname.replace(/^www\./, '')
+      } catch {
+        domain = ''
+      }
+    }
+
+    const title = (item.title || 'Image').trim()
+    const imageUrl = (typeof item.img_src === 'string' && item.img_src)
+      ? item.img_src
+      : (typeof item.thumbnail_src === 'string' && item.thumbnail_src)
+      ? item.thumbnail_src
+      : item.url || ''
+
+    return {
+      id: `searxng-img-${index + 1}`,
+      title,
+      source: domain || item.engine || 'Web',
+      domain: domain || 'web',
+      imageUrl,
+      width: typeof item.width === 'number' && item.width > 0 ? item.width : 600,
+      height: typeof item.height === 'number' && item.height > 0 ? item.height : 400,
+      destinationUrl: pageUrl || imageUrl,
+    }
+  })
+}
+
+export function normalizeSearxngVideoResults(
+  rawResults: SearxngResultItem[],
+  query?: string
+): VideoResult[] {
+  const cleanQuery = (query || '').toLowerCase().trim()
+  const queryTokens = cleanQuery.split(/\s+/).filter((t) => t.length > 2)
+
+  const dedupMap = new Map<string, { item: SearxngResultItem; calculatedScore: number }>()
+
+  for (const item of rawResults) {
+    if (!item || !item.url) continue
+    const canonical = canonicalizeUrl(item.url)
+    if (!canonical) continue
+
+    const relScore = calculateResultRelevance(item, queryTokens, cleanQuery)
+    if (!dedupMap.has(canonical)) {
+      dedupMap.set(canonical, { item, calculatedScore: relScore })
+    }
+  }
+
+  const sortedEntries = Array.from(dedupMap.values()).sort((a, b) => b.calculatedScore - a.calculatedScore)
+
+  return sortedEntries.map((entry, index) => {
+    const item = entry.item
+    let domain = ''
+    if (item.url) {
+      try {
+        domain = new URL(item.url).hostname.replace(/^www\./, '')
+      } catch {
+        domain = ''
+      }
+    }
+
+    const title = (item.title || 'Video').trim()
+    const description = (item.content || item.snippet || '').trim()
+    const thumbnailUrl = typeof item.thumbnail === 'string'
+      ? item.thumbnail
+      : typeof item.img_src === 'string'
+      ? item.img_src
+      : ''
+    const duration = typeof item.length === 'string' ? item.length : 'Video'
+
+    return {
+      id: `searxng-vid-${index + 1}`,
+      title,
+      source: domain || item.engine || 'Video',
+      domain: domain || 'video',
+      thumbnailUrl,
+      duration,
+      description,
+      published: item.publishedDate || item.pubdate || 'Recent',
+      destinationUrl: item.url || '',
+    }
+  })
+}
+
 export class SearxngSearchProvider {
   private instanceUrl: string
   private timeoutMs: number
@@ -132,7 +458,7 @@ export class SearxngSearchProvider {
     this.timeoutMs = timeoutMs ?? config.searchTimeoutMs
   }
 
-  async search(query: string, vertical?: SearchVertical): Promise<SearchApiResponse<WebSearchResult>> {
+  async search(query: string, vertical: SearchVertical = 'all'): Promise<SearchApiResponse> {
     if (!this.instanceUrl) {
       throw new AppError(
         'Live search provider is not configured. Add SEARXNG_URL to backend/.env or set SEARCH_PROVIDER=mock.',
@@ -157,7 +483,13 @@ export class SearxngSearchProvider {
 
     targetUrl.searchParams.set('q', query)
     targetUrl.searchParams.set('format', 'json')
-    if (vertical === 'all' || !vertical) {
+    if (vertical === 'news') {
+      targetUrl.searchParams.set('categories', 'news')
+    } else if (vertical === 'images') {
+      targetUrl.searchParams.set('categories', 'images')
+    } else if (vertical === 'videos') {
+      targetUrl.searchParams.set('categories', 'videos')
+    } else {
       targetUrl.searchParams.set('categories', 'general')
     }
 
@@ -237,7 +569,76 @@ export class SearxngSearchProvider {
     }
 
     const rawResults = Array.isArray(rawData.results) ? rawData.results : []
-    const webResults = normalizeSearxngWebResults(rawResults)
+    const executionTimeMs = Date.now() - startTime
+
+    if (vertical === 'news') {
+      const newsResults = normalizeSearxngNewsResults(rawResults, query)
+      return {
+        query,
+        vertical: 'news',
+        isDemo: false,
+        provider: 'searxng',
+        resultCount:
+          newsResults.length > 0
+            ? `Found ${newsResults.length} news articles for "${query}" (SearXNG Metasearch)`
+            : `No news found for "${query}" (SearXNG Metasearch)`,
+        results: newsResults,
+        metadata: {
+          executionTimeMs,
+          timestamp: new Date().toISOString(),
+          isIndexedData: true,
+          notice: 'Live news results powered by SearXNG metasearch instance.',
+          totalEstimate: typeof rawData.number_of_results === 'number' ? rawData.number_of_results : newsResults.length,
+        },
+      }
+    }
+
+    if (vertical === 'images') {
+      const imageResults = normalizeSearxngImageResults(rawResults, query)
+      return {
+        query,
+        vertical: 'images',
+        isDemo: false,
+        provider: 'searxng',
+        resultCount:
+          imageResults.length > 0
+            ? `Found ${imageResults.length} images for "${query}" (SearXNG Metasearch)`
+            : `No images found for "${query}" (SearXNG Metasearch)`,
+        results: imageResults,
+        metadata: {
+          executionTimeMs,
+          timestamp: new Date().toISOString(),
+          isIndexedData: true,
+          notice: 'Live image results powered by SearXNG metasearch instance.',
+          totalEstimate: typeof rawData.number_of_results === 'number' ? rawData.number_of_results : imageResults.length,
+        },
+      }
+    }
+
+    if (vertical === 'videos') {
+      const videoResults = normalizeSearxngVideoResults(rawResults, query)
+      return {
+        query,
+        vertical: 'videos',
+        isDemo: false,
+        provider: 'searxng',
+        resultCount:
+          videoResults.length > 0
+            ? `Found ${videoResults.length} videos for "${query}" (SearXNG Metasearch)`
+            : `No videos found for "${query}" (SearXNG Metasearch)`,
+        results: videoResults,
+        metadata: {
+          executionTimeMs,
+          timestamp: new Date().toISOString(),
+          isIndexedData: true,
+          notice: 'Live video results powered by SearXNG metasearch instance.',
+          totalEstimate: typeof rawData.number_of_results === 'number' ? rawData.number_of_results : videoResults.length,
+        },
+      }
+    }
+
+    // Default: 'all'
+    const webResults = normalizeSearxngWebResults(rawResults, query)
     const rawInfobox = Array.isArray(rawData.infoboxes) && rawData.infoboxes.length > 0
       ? (rawData.infoboxes[0] as SearxngInfoboxItem)
       : undefined
@@ -253,7 +654,6 @@ export class SearxngSearchProvider {
         sources: aiAnswerService.extractSourceCitations(webResults).slice(0, 5),
       }
     }
-    const executionTimeMs = Date.now() - startTime
 
     const relatedSearches =
       Array.isArray(rawData.suggestions) && rawData.suggestions.length > 0

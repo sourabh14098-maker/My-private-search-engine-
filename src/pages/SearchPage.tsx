@@ -24,23 +24,20 @@ export function SearchPage() {
   useEffect(() => {
     if (!query) return
 
-    let cancelled = false
+    const controller = new AbortController()
 
-    searchService.search(query)
+    searchService.search(query, controller.signal)
       .then((res) => {
-        if (!cancelled) {
-          setData(res)
-          setError(null)
-        }
+        setData(res)
+        setError(null)
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err?.message || 'Unable to load search results.')
-        }
+        if (err?.name === 'AbortError') return
+        setError(err?.message || 'Unable to load search results.')
       })
 
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [query])
 

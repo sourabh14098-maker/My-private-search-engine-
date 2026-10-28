@@ -33,17 +33,19 @@ export class SearchService {
 
     const providerType = this.activeProviderType || config.searchProvider
 
-    // Route 'all' (Web) vertical to configured live provider
-    if (vertical === 'all') {
-      if (providerType === 'searxng') {
+    // Route supported verticals to SearXNG when active provider is searxng
+    if (providerType === 'searxng') {
+      if (vertical === 'all' || vertical === 'news' || vertical === 'images' || vertical === 'videos') {
         return this.searxngProvider.search(query, vertical)
-      }
-      if (providerType === 'brave') {
-        return this.braveProvider.search(query, vertical)
       }
     }
 
-    // All other verticals (and 'all' when searchProvider === 'mock' or unsupported) use MockSearchProvider
+    // Route 'all' (Web) vertical to configured live Brave provider
+    if (vertical === 'all' && providerType === 'brave') {
+      return this.braveProvider.search(query, vertical)
+    }
+
+    // All other verticals (and all verticals when searchProvider === 'mock' or unsupported) use MockSearchProvider
     return this.mockProvider.search(query, vertical)
   }
 }

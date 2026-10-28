@@ -6,6 +6,10 @@ import {
   renderInlineMarkdown,
   correctProgrammingInaccuracies,
   repairCodeBlocks,
+  isProgrammingQuery,
+  evaluateAnswerTruncation,
+  COLLAPSED_HEIGHT_PX,
+  EXPANSION_THRESHOLD_PX,
 } from '../../src/utils/markdownParser.js'
 import type { AnswerSource } from '../../src/types.js'
 
@@ -462,6 +466,168 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       assert.ok(repairedStub.includes('class Dog extends Animal {'))
       assert.ok(repairedStub.includes('public static void main(String[] args) {'))
     })
+
+    it('should strip unsolicited Java code blocks from non-programming markdown and preserve general text', () => {
+      const nonCodingInput = [
+        'Photosynthesis is the process by which green plants synthesize nutrients from carbon dioxide and water.',
+        '',
+        '```java',
+        'public class Plant {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Photosynthesis");',
+        '    }',
+        '}',
+        '```',
+        '',
+        'Oxygen is released as a byproduct.',
+      ].join('\n')
+
+      const cleaned = cleanRawMarkdown(nonCodingInput, 'Explain photosynthesis')
+      assert.ok(cleaned.includes('Photosynthesis is the process'))
+      assert.equal(isProgrammingQuery('Explain photosynthesis'), false)
+      assert.equal(isProgrammingQuery('Explain Java inheritance with code'), true)
+      assert.ok(!cleaned.includes('public class Plant'))
+      assert.ok(!cleaned.includes('System.out.println'))
+
+      const blocks = parseMarkdownBlocks(nonCodingInput, 'Explain photosynthesis')
+      assert.ok(blocks.every((b) => b.type !== 'code-block'))
+      assert.ok(blocks.some((b) => b.type === 'paragraph' && b.text?.includes('Photosynthesis is the process')))
+    })
+  })
+
+  describe('evaluateAnswerTruncation (Show More / Show Less Engine)', () => {
+    it('should export standard truncation constants (280px collapsed, 340px expansion threshold)', () => {
+      assert.equal(COLLAPSED_HEIGHT_PX, 280)
+      assert.equal(EXPANSION_THRESHOLD_PX, 340)
+    })
+
+    it('should NOT truncate short answers that easily fit within collapsed height (<= 280px)', () => {
+      // Short 1-2 sentence answers: no Show More / Show Less toggle button
+      const res0 = evaluateAnswerTruncation(0)
+      assert.equal(res0.isTruncated, false)
+      assert.equal(res0.collapsedHeight, 280)
+
+      const res120 = evaluateAnswerTruncation(120)
+      assert.equal(res120.isTruncated, false)
+      assert.equal(res120.collapsedHeight, 280)
+
+      const res280 = evaluateAnswerTruncation(280)
+      assert.equal(res280.isTruncated, false)
+      assert.equal(res280.collapsedHeight, 280)
+    })
+
+    it('should NOT truncate medium answers that fit within the 340px buffer threshold (281px - 340px)', () => {
+      // Medium answers should remain fully visible whenever practical without toggle
+      const res281 = evaluateAnswerTruncation(281)
+      assert.equal(res281.isTruncated, false)
+      assert.equal(res281.collapsedHeight, 280)
+
+      const res310 = evaluateAnswerTruncation(310)
+      assert.equal(res310.isTruncated, false)
+      assert.equal(res310.collapsedHeight, 280)
+
+      const res340 = evaluateAnswerTruncation(340)
+      assert.equal(res340.isTruncated, false)
+      assert.equal(res340.collapsedHeight, 280)
+    })
+
+    it('should truncate genuinely long answers exceeding the threshold (> 340px)', () => {
+      // Long answers collapse at 280px and enable Show More
+      const res341 = evaluateAnswerTruncation(341)
+      assert.equal(res341.isTruncated, true)
+      assert.equal(res341.collapsedHeight, 280)
+
+      const res500 = evaluateAnswerTruncation(500)
+      assert.equal(res500.isTruncated, true)
+      assert.equal(res500.collapsedHeight, 280)
+
+      const res1200 = evaluateAnswerTruncation(1200)
+      assert.equal(res1200.isTruncated, true)
+      assert.equal(res1200.collapsedHeight, 280)
+    })
+
+    it('should handle edge cases (negative values or non-number) gracefully without truncating', () => {
+      const resNeg = evaluateAnswerTruncation(-50)
+      assert.equal(resNeg.isTruncated, false)
+
+      const resNaN = evaluateAnswerTruncation(NaN as any)
+      assert.equal(resNaN.isTruncated, false)
+
+      const resNull = evaluateAnswerTruncation(null as any)
+      assert.equal(resNull.isTruncated, false)
+    })
+  })
+
+  describe('Answer Content & Formatting Preservation in Truncated / Long Answers', () => {
+    it('should preserve code blocks, indentation, and structure in long programming answers', () => {
+      const longCodingAnswer = [
+        '### Binary Search in Java',
+        'Here is the complete binary search implementation in Java [1]:',
+        '',
+        '```java',
+        'public class BinarySearch {',
+        '    public static int search(int[] arr, int target) {',
+        '        int left = 0;',
+        '        int right = arr.length - 1;',
+        '        while (left <= right) {',
+        '            int mid = left + (right - left) / 2;',
+        '            if (arr[mid] == target) {',
+        '                return mid;',
+        '            } else if (arr[mid] < target) {',
+        '                left = mid + 1;',
+        '            } else {',
+        '                right = mid - 1;',
+        '            }',
+        '        }',
+        '        return -1;',
+        '    }',
+        '    public static void main(String[] args) {',
+        '        int[] numbers = { 1, 3, 5, 7, 9, 11 };',
+        '        System.out.println(search(numbers, 7));',
+        '    }',
+        '}',
+        '```',
+        '',
+        '**Complexity Analysis:**',
+        '- Time Complexity: O(log n)',
+        '- Space Complexity: O(1)',
+        'This algorithm is optimal for sorted arrays [2].',
+      ].join('\n')
+
+      const blocks = parseMarkdownBlocks(longCodingAnswer, 'Binary search in Java')
+      const codeBlock = blocks.find((b) => b.type === 'code-block')
+      assert.ok(codeBlock, 'Code block must be extracted')
+      assert.equal(codeBlock?.language, 'java')
+      assert.ok(codeBlock?.code?.includes('int mid = left + (right - left) / 2;'), 'Inner logic preserved')
+      assert.ok(codeBlock?.code?.includes('        int left = 0;'), 'Indentation preserved')
+      assert.ok(codeBlock?.code?.includes('public static void main'), 'Main entrypoint preserved')
+
+      // Check heading and list items
+      const heading = blocks.find((b) => b.type === 'heading')
+      assert.equal(heading?.text, 'Binary Search in Java')
+
+      const list = blocks.find((b) => b.type === 'bullet-list')
+      assert.ok(list?.items && list.items.length === 2)
+      assert.ok(list?.items[0].includes('O(log n)'))
+    })
+
+    it('should preserve and resolve citations [1] and [2] cleanly across multi-paragraph answers', () => {
+      const multiParagraphAnswer = [
+        'Java is an object-oriented programming language developed by Sun Microsystems [1].',
+        '',
+        'It compiles source code into platform-independent bytecode [2].',
+      ].join('\n')
+
+      const blocks = parseMarkdownBlocks(multiParagraphAnswer, 'What is Java')
+      assert.equal(blocks.length, 2)
+
+      const rendered1 = renderInlineMarkdown(blocks[0].text || '', mockSources)
+      assert.ok(rendered1.some((n: any) => n && typeof n === 'object' && n.key?.startsWith('cite-group')))
+
+      const rendered2 = renderInlineMarkdown(blocks[1].text || '', mockSources)
+      assert.ok(rendered2.some((n: any) => n && typeof n === 'object' && n.key?.startsWith('cite-group')))
+    })
   })
 })
+
 

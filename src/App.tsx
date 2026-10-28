@@ -4,7 +4,7 @@ import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useSearch
 import { Footer } from './components/layout/Footer'
 import { Navbar } from './components/layout/Navbar'
 import { SearchLayout } from './components/layout/SearchLayout'
-import { AISummary } from './components/search/AISummary'
+import { AnswerLayer } from './components/search/AnswerLayer'
 import { SearchResult } from './components/search/SearchResult'
 import { QuickContextCard } from './components/search/QuickContextCard'
 import { PrivacyStatus } from './components/privacy/PrivacyStatus'
@@ -77,34 +77,32 @@ function VerticalPage({ mode }: { mode: Exclude<SearchMode, 'all' | 'ai' | 'news
 
   useEffect(() => {
     if (!query) return
-    let cancelled = false
+
+    const controller = new AbortController()
 
     const loader =
       mode === 'images'
-        ? searchService.images(query)
+        ? searchService.images(query, controller.signal)
         : mode === 'videos'
-        ? searchService.videos(query)
+        ? searchService.videos(query, controller.signal)
         : mode === 'maps'
-        ? searchService.maps(query)
+        ? searchService.maps(query, controller.signal)
         : mode === 'shopping'
-        ? searchService.shopping(query)
-        : searchService.books(query)
+        ? searchService.shopping(query, controller.signal)
+        : searchService.books(query, controller.signal)
 
     loader
       .then((data) => {
-        if (!cancelled) {
-          setRequest({ mode, data })
-          setError(null)
-        }
+        setRequest({ mode, data })
+        setError(null)
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err?.message || `Unable to load ${mode} results.`)
-        }
+        if (err?.name === 'AbortError') return
+        setError(err?.message || `Unable to load ${mode} results.`)
       })
 
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [mode, query])
 
@@ -190,7 +188,7 @@ function VerticalPage({ mode }: { mode: Exclude<SearchMode, 'all' | 'ai' | 'news
             <button onClick={() => setPreview(null)} aria-label="Close preview">
               Close
             </button>
-            <img src={preview.imageUrl} alt={preview.title} />
+            <img src={preview.imageUrl} alt={preview.title} referrerPolicy="no-referrer" />
             <h2>{preview.title}</h2>
             <p>{preview.domain} · {preview.source} (Sample image)</p>
           </div>
@@ -262,23 +260,21 @@ function AIPage() {
 
   useEffect(() => {
     if (!query) return
-    let cancelled = false
 
-    searchService.ai(query)
+    const controller = new AbortController()
+
+    searchService.ai(query, controller.signal)
       .then((res) => {
-        if (!cancelled) {
-          setData(res)
-          setError(null)
-        }
+        setData(res)
+        setError(null)
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err?.message || 'Unable to load AI summary.')
-        }
+        if (err?.name === 'AbortError') return
+        setError(err?.message || 'Unable to load AI summary.')
       })
 
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [query])
 
@@ -333,7 +329,7 @@ function AIPage() {
         <LoadingSkeleton />
       ) : (
         <div className="ai-page-feed">
-          <AISummary query={query || 'Your topic'} />
+          <AnswerLayer query={query} answer={data?.aiAnswer} loading={loading} />
           <div className="ai-web-results">
             <div className="section-kicker">
               <span>SAMPLE WEB SOURCES (DEMO)</span>

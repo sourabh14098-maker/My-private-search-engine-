@@ -11,6 +11,28 @@ export interface MarkdownBlock {
   language?: string
 }
 
+export const COLLAPSED_HEIGHT_PX = 280
+export const EXPANSION_THRESHOLD_PX = 340
+
+/**
+ * Evaluates whether an answer container genuinely overflows the available space
+ * and warrants a Show More / Show Less toggle control.
+ *
+ * Rules:
+ * - Short answers (<= 280px) and Medium answers (280px - 340px) fit naturally: isTruncated = false (no toggle button).
+ * - Long answers (> 340px) genuinely overflow: isTruncated = true, collapsed at COLLAPSED_HEIGHT_PX (280px).
+ */
+export function evaluateAnswerTruncation(scrollHeight: number): {
+  isTruncated: boolean
+  collapsedHeight: number
+} {
+  const isTruncated = typeof scrollHeight === 'number' && scrollHeight > EXPANSION_THRESHOLD_PX
+  return {
+    isTruncated,
+    collapsedHeight: COLLAPSED_HEIGHT_PX,
+  }
+}
+
 /**
  * Repairs malformed programming code answers:
  * - Ensures Java and other programming examples are complete, syntactically coherent, and in fenced code blocks.
@@ -19,6 +41,39 @@ export interface MarkdownBlock {
  * - Completes missing closing curly braces or unclosed code fences.
  * - If source evidence is minimal, provides a short correct example rather than a broken one.
  */
+/**
+ * Detects if a user query is asking for programming assistance, code examples, or software engineering concepts.
+ */
+export function isProgrammingQuery(query?: string): boolean {
+  if (!query || typeof query !== 'string') return false
+  const q = query.trim().toLowerCase()
+  if (!q) return false
+
+  // Exceptions for queries using terms like "java" or "python" in geographical, biological, or food contexts
+  const isGeographicalOrBiological =
+    /\b(?:island\s+of\s+java|java\s+island|java\s+sea|java\s+sparrow|java\s+rhino|java\s+indonesia|coffee\s+bean|coffee\s+roast|burmese\s+python|ball\s+python|reticulated\s+python|python\s+snake)\b/i.test(q)
+  if (isGeographicalOrBiological && !/\b(?:code|programming|script|class|function|syntax|developer|software)\b/i.test(q)) {
+    return false
+  }
+
+  // Known programming languages
+  const languagePattern =
+    /\b(?:java|python|javascript|typescript|c\+\+|cpp|c#|csharp|golang|rust|ruby|php|swift|kotlin|scala|sql|html|css|bash|powershell|perl|dart|r\s+programming)\b/i
+
+  // Programming actions, syntax concepts, and keywords
+  const actionPattern =
+    /\b(?:code|coding|program|programming|script|syntax|compile|compiler|runtime|debugging|debug|exception|stack\s*trace|algorithm|data\s+structure|regex|regular\s+expression|api|sdk|library|framework|function|method|variable|class|interface|inheritance|polymorphism|encapsulation|recursion|array|pointer|json|xml|async|await|promise|loop|import|export|react|angular|vue|node\.?js|spring\s+boot|django|flask|fastapi)\b/i
+
+  // Colloquial Hinglish coding phrases
+  const colloquialCodingPattern =
+    /\b(?:code\s+(?:de|do|likho|likhein|banao|samjhao)|program\s+(?:banao|karo|likho)|syntax\s+kya\s+hai)\b/i
+
+  // Devanagari Hindi coding terms
+  const devanagariCodingPattern = /(?:कोड|प्रोग्राम|सिंटैक्स|इनहेरिटेंस|कंपाइलर|फंक्शन|क्लास)/
+
+  return languagePattern.test(q) || actionPattern.test(q) || colloquialCodingPattern.test(q) || devanagariCodingPattern.test(q)
+}
+
 /**
  * Ensures Java code examples are complete, demonstrate requested concepts like inheritance,
  * and include a runnable main() method.
@@ -125,9 +180,10 @@ function ensureRunnableJavaMain(
 export function repairCodeBlocks(text: string, query?: string): string {
   if (!text) return ''
 
-  const isJavaInheritanceContext =
-    (/inheritance/i.test(query || '') || /inheritance/i.test(text)) &&
-    (/java/i.test(query || '') || /java/i.test(text))
+  const isCoding = query ? isProgrammingQuery(query) : true
+  const isJavaInheritanceContext = query
+    ? isCoding && /java\b/i.test(query) && (/inheritance/i.test(query) || /इनहेरिटेंस/.test(query))
+    : (/inheritance/i.test(text) || /इनहेरिटेंस/.test(text)) && /java\b/i.test(text)
 
   // 1. Normalize code fences with duplicated language tags on the same line: e.g. ```java java -> ```java
   let result = text.replace(/^```[ \t]*([a-zA-Z0-9_#+-]+)(?:[ \t,:]+([a-zA-Z0-9_#+-]+))+[^\r\n]*$/gm, '```$1')
@@ -311,14 +367,19 @@ export function correctProgrammingInaccuracies(text: string, languageStyle?: str
  * 8. Strips internal citation/metadata artifacts ([#operation], [#result], [operation: ...]).
  * 9. Strips conversational sign-offs, orphaned trailing headings, and incomplete dangling fragments.
  */
-export function cleanRawMarkdown(text: string): string {
+export function cleanRawMarkdown(text: string, query?: string): string {
   if (!text) return ''
 
   // 1. Correct programming inaccuracies first
   let cleaned = correctProgrammingInaccuracies(text)
 
   // 2. Repair code blocks
-  cleaned = repairCodeBlocks(cleaned.replace(/\r\n/g, '\n')).trim()
+  cleaned = repairCodeBlocks(cleaned.replace(/\r\n/g, '\n'), query).trim()
+
+  // 3. Strip unsolicited Java code blocks from non-programming answers
+  if (query && !isProgrammingQuery(query)) {
+    cleaned = cleaned.replace(/```(?:java|code)?[ \t]*\r?\n[\s\S]*?(?:public\s+class|class\s+\w+|System\.out\.print)[\s\S]*?```/gi, '').trim()
+  }
 
   // 2. Isolate code blocks during prose markdown cleaning
   const codeBlocks: string[] = []
@@ -467,8 +528,8 @@ export function cleanRawMarkdown(text: string): string {
 /**
  * Parses markdown text into structured semantic blocks (headings, code blocks, lists, paragraphs).
  */
-export function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
-  const cleaned = cleanRawMarkdown(rawText)
+export function parseMarkdownBlocks(rawText: string, query?: string): MarkdownBlock[] {
+  const cleaned = cleanRawMarkdown(rawText, query)
   const lines = cleaned.split('\n')
   const blocks: MarkdownBlock[] = []
   let currentBlock: MarkdownBlock | null = null

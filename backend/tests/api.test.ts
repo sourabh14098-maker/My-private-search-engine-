@@ -143,7 +143,11 @@ describe('Backend Foundation API Tests', () => {
 
       assert.equal(res.status, 200)
       assert.equal(res.body.vertical, 'images')
-      assert.equal(res.body.isDemo, true)
+      if (process.env.SEARCH_PROVIDER === 'searxng' && process.env.SEARXNG_URL) {
+        assert.equal(res.body.isDemo, false)
+      } else {
+        assert.equal(res.body.isDemo, true)
+      }
       assert.ok(res.body.results.length > 0)
       assert.ok(res.body.results[0].imageUrl)
       assert.ok(res.body.results[0].width)
@@ -154,7 +158,11 @@ describe('Backend Foundation API Tests', () => {
 
       assert.equal(res.status, 200)
       assert.equal(res.body.vertical, 'videos')
-      assert.equal(res.body.isDemo, true)
+      if (process.env.SEARCH_PROVIDER === 'searxng' && process.env.SEARXNG_URL) {
+        assert.equal(res.body.isDemo, false)
+      } else {
+        assert.equal(res.body.isDemo, true)
+      }
       assert.ok(res.body.results.length > 0)
       assert.ok(res.body.results[0].duration)
     })
@@ -164,7 +172,11 @@ describe('Backend Foundation API Tests', () => {
 
       assert.equal(res.status, 200)
       assert.equal(res.body.vertical, 'news')
-      assert.equal(res.body.isDemo, true)
+      if (process.env.SEARCH_PROVIDER === 'searxng' && process.env.SEARXNG_URL) {
+        assert.equal(res.body.isDemo, false)
+      } else {
+        assert.equal(res.body.isDemo, true)
+      }
       assert.ok(res.body.results.length > 0)
       assert.ok(res.body.results[0].publisher)
     })
@@ -591,21 +603,28 @@ describe('Backend Foundation API Tests', () => {
   })
 
   describe('Provider selection, fallback honesty, and vertical preservation', () => {
-    it('should route non-all verticals to MockSearchProvider even if a live provider is selected', async () => {
+    it('should route unsupported verticals to MockSearchProvider even if a live provider is selected', async () => {
       const { SearchService } = await import('../src/services/search.service.js')
-      const service = new SearchService()
+      const braveService = new SearchService(undefined, 'brave')
 
-      // Images vertical must return mock images
-      const imgRes = await service.search('privacy', 'images')
+      // Images vertical must return mock images for Brave
+      const imgRes = await braveService.search('privacy', 'images')
       assert.equal(imgRes.vertical, 'images')
       assert.equal(imgRes.isDemo, true)
       assert.ok(imgRes.results.length > 0)
 
-      // News vertical must return mock news
-      const newsRes = await service.search('open source', 'news')
+      // News vertical must return mock news for Brave
+      const newsRes = await braveService.search('open source', 'news')
       assert.equal(newsRes.vertical, 'news')
       assert.equal(newsRes.isDemo, true)
       assert.ok(newsRes.results.length > 0)
+
+      // Maps vertical must return mock maps for SearXNG
+      const searxngService = new SearchService(undefined, 'searxng')
+      const mapsRes = await searxngService.search('privacy', 'maps')
+      assert.equal(mapsRes.vertical, 'maps')
+      assert.equal(mapsRes.isDemo, true)
+      assert.ok(mapsRes.results.length > 0)
     })
 
     it('should route to MockSearchProvider when provider is mock and never claim live status', async () => {
@@ -2378,7 +2397,306 @@ describe('Backend Foundation API Tests', () => {
       assert.ok(!loneStubInInheritance.includes('System.out.println("Hello, World!");'))
     })
   })
+
+  describe('Phase 1 — Dynamic Prompts & Java Hallucination Elimination Tests', () => {
+    it('should correctly classify programming queries vs general knowledge queries', async () => {
+      const { isProgrammingQuery } = await import('../src/services/ai.service.js')
+
+      // General queries must be false
+      assert.equal(isProgrammingQuery('What is the capital of France?'), false)
+      assert.equal(isProgrammingQuery('Who was Mahatma Gandhi?'), false)
+      assert.equal(isProgrammingQuery('How does photosynthesis work?'), false)
+      assert.equal(isProgrammingQuery('Chocolate chip cookies recipe'), false)
+      assert.equal(isProgrammingQuery('Where is Java island in Indonesia?'), false)
+      assert.equal(isProgrammingQuery('Ball python care guide'), false)
+      assert.equal(isProgrammingQuery('Weather in Mumbai today'), false)
+      assert.equal(isProgrammingQuery('Latest news about space exploration'), false)
+
+      // Programming queries must be true
+      assert.equal(isProgrammingQuery('Explain Java inheritance with code'), true)
+      assert.equal(isProgrammingQuery('Python list comprehension examples'), true)
+      assert.equal(isProgrammingQuery('How to write a REST API in Go'), true)
+      assert.equal(isProgrammingQuery('TypeScript generics tutorial'), true)
+      assert.equal(isProgrammingQuery('Bhai Java kya hai code samjhao'), true)
+      assert.equal(isProgrammingQuery('जावा में इनहेरिटेंस क्या है कोड के साथ बताएं'), true)
+      assert.equal(isProgrammingQuery('Explain binary search algorithm'), true)
+    })
+
+    it('should strip unsolicited Java code blocks from non-programming query answers', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Paris Overview',
+          url: 'https://en.wikipedia.org/wiki/Paris',
+          destinationUrl: 'https://en.wikipedia.org/wiki/Paris',
+          domain: 'wikipedia.org',
+          snippet: 'Paris is the capital and largest city of France.',
+        },
+      ]
+
+      // Simulated hallucination where small model emitted unrelated Java class in a non-coding query
+      const hallucinatedAnswer = [
+        'Paris is the capital and most populous city of France [1].',
+        '',
+        '```java',
+        'public class Main {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Paris");',
+        '    }',
+        '}',
+        '```',
+        '',
+        'It is known for its art, fashion, gastronomy, and culture.',
+      ].join('\n')
+
+      const res = service.evaluateAndFormatAnswer(hallucinatedAnswer, sources, 'english', 'What is the capital of France?')
+      assert.equal(res.status, 'ready')
+      assert.ok(res.answer?.includes('Paris is the capital and most populous city of France [1].'))
+      assert.ok(res.answer?.includes('It is known for its art, fashion, gastronomy, and culture.'))
+      // Unsolicited Java code block must be stripped completely
+      assert.ok(!res.answer?.includes('public class Main'))
+      assert.ok(!res.answer?.includes('System.out.println'))
+      assert.ok(!res.answer?.includes('```java'))
+    })
+
+    it('should preserve correct Java examples when programming code is explicitly requested', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2:1b',
+      })
+
+      const sources = [
+        {
+          title: 'Java Basics',
+          url: 'https://docs.oracle.com/java',
+          destinationUrl: 'https://docs.oracle.com/java',
+          domain: 'oracle.com',
+          snippet: 'Java is an object-oriented language.',
+        },
+      ]
+
+      const codingAnswer = [
+        'Here is a simple Java program printing a greeting [1]:',
+        '',
+        '```java',
+        'public class HelloWorld {',
+        '    public static void main(String[] args) {',
+        '        System.out.println("Hello, World!");',
+        '    }',
+        '}',
+        '```',
+      ].join('\n')
+
+      const res = service.evaluateAndFormatAnswer(codingAnswer, sources, 'english', 'Write a hello world program in Java')
+      assert.equal(res.status, 'ready')
+      assert.ok(res.answer?.includes('```java'))
+      assert.ok(res.answer?.includes('public class HelloWorld {'))
+      assert.ok(res.answer?.includes('System.out.println("Hello, World!");'))
+    })
+  })
+
+  describe('Phase 3 — SearXNG Verticals, Deduplication & Ranking Tests', () => {
+    it('should canonicalize URLs and strip tracking parameters cleanly', async () => {
+      const { canonicalizeUrl } = await import('../src/services/providers/searxng.provider.js')
+
+      const url1 = 'https://www.example.com/article/?utm_source=twitter&utm_medium=social&utm_campaign=launch#comments'
+      assert.equal(canonicalizeUrl(url1), 'https://example.com/article')
+
+      const url2 = 'https://example.com/docs/guide?gclid=abc1234&fbclid=xyz&ref=rss'
+      assert.equal(canonicalizeUrl(url2), 'https://example.com/docs/guide')
+
+      const url3 = 'http://test.org:80/path/'
+      assert.equal(canonicalizeUrl(url3), 'http://test.org/path')
+
+      const url4 = 'https://example.com/search?q=open+source&page=2'
+      assert.equal(canonicalizeUrl(url4), 'https://example.com/search?q=open+source&page=2')
+    })
+
+    it('should deduplicate identical URLs across aggregated engines and merge engine consensus in normalizeSearxngWebResults', async () => {
+      const { normalizeSearxngWebResults } = await import('../src/services/providers/searxng.provider.js')
+
+      const rawItems = [
+        {
+          title: 'DitchX Private Engine Guide',
+          url: 'https://example.com/ditchx?utm_source=duckduckgo',
+          content: 'Short snippet from DuckDuckGo',
+          engine: 'duckduckgo',
+          score: 1.0,
+        },
+        {
+          title: 'DitchX Private Engine Guide',
+          url: 'https://www.example.com/ditchx/',
+          content: 'Much more comprehensive description of DitchX private architecture and principles from Google.',
+          engine: 'google',
+          score: 1.2,
+        },
+        {
+          title: 'Unrelated Search Result',
+          url: 'https://other.org/article',
+          content: 'Other article content',
+          engine: 'bing',
+          score: 0.5,
+        },
+      ]
+
+      const webResults = normalizeSearxngWebResults(rawItems, 'ditchx private engine')
+      // 3 items should be deduplicated to 2
+      assert.equal(webResults.length, 2)
+      const mergedItem = webResults.find((r) => r.url.includes('example.com/ditchx'))
+      assert.ok(mergedItem, 'Must contain merged example.com/ditchx item')
+      // Engines must be merged
+      assert.ok(mergedItem.metadata?.includes('duckduckgo') && mergedItem.metadata?.includes('google'))
+      // Longer description should be preserved
+      assert.ok(mergedItem.description.includes('Much more comprehensive description'))
+      // Top ranked result should be the query-matched, multi-engine consensus item
+      assert.equal(webResults[0].id, 'searxng-web-1')
+      assert.equal(webResults[0].url, 'https://example.com/ditchx?utm_source=duckduckgo')
+    })
+
+    it('should rank results by engine consensus and query token relevance', async () => {
+      const { normalizeSearxngWebResults } = await import('../src/services/providers/searxng.provider.js')
+
+      const rawItems = [
+        {
+          title: 'Generic Tech Overview',
+          url: 'https://generic.com/overview',
+          content: 'Random content with no query match',
+          engine: 'bing',
+          score: 1.0,
+        },
+        {
+          title: 'Complete Guide to Quantum Computing Algorithms',
+          url: 'https://quantum.edu/guide',
+          content: 'Deep dive into quantum computing algorithms and qubits',
+          engines: ['google', 'duckduckgo', 'qwant'],
+          score: 2.5,
+        },
+      ]
+
+      const webResults = normalizeSearxngWebResults(rawItems, 'quantum computing')
+      assert.equal(webResults.length, 2)
+      // Quantum computing result has title match + 3 engines consensus -> must be ranked first
+      assert.equal(webResults[0].title, 'Complete Guide to Quantum Computing Algorithms')
+      assert.equal(webResults[1].title, 'Generic Tech Overview')
+    })
+
+    it('should normalize news, image, and video verticals from SearXNG responses', async () => {
+      const {
+        normalizeSearxngNewsResults,
+        normalizeSearxngImageResults,
+        normalizeSearxngVideoResults,
+      } = await import('../src/services/providers/searxng.provider.js')
+
+      // News normalization
+      const newsItems = [
+        {
+          title: 'Major Breakthrough in Renewable Energy',
+          url: 'https://news.example.com/solar-breakthrough?utm_source=rss',
+          content: 'Scientists announce new high-efficiency solar cells.',
+          publishedDate: '2 hours ago',
+          img_src: 'https://news.example.com/solar.jpg',
+          engine: 'google news',
+        },
+      ]
+      const newsResults = normalizeSearxngNewsResults(newsItems, 'solar energy')
+      assert.equal(newsResults.length, 1)
+      assert.equal(newsResults[0].id, 'searxng-news-1')
+      assert.equal(newsResults[0].headline, 'Major Breakthrough in Renewable Energy')
+      assert.equal(newsResults[0].timestamp, '2 hours ago')
+      assert.equal(newsResults[0].imageUrl, 'https://news.example.com/solar.jpg')
+
+      // Image normalization
+      const imgItems = [
+        {
+          title: 'Solar Panel Array',
+          url: 'https://images.example.com/solar-panel.html',
+          img_src: 'https://images.example.com/solar-panel.jpg',
+          width: 800,
+          height: 600,
+          engine: 'bing images',
+        },
+      ]
+      const imgResults = normalizeSearxngImageResults(imgItems, 'solar panel')
+      assert.equal(imgResults.length, 1)
+      assert.equal(imgResults[0].id, 'searxng-img-1')
+      assert.equal(imgResults[0].imageUrl, 'https://images.example.com/solar-panel.jpg')
+      assert.equal(imgResults[0].width, 800)
+      assert.equal(imgResults[0].height, 600)
+
+      // Video normalization
+      const videoItems = [
+        {
+          title: 'How Solar Panels Work in 5 Minutes',
+          url: 'https://video.example.com/watch?v=12345',
+          thumbnail: 'https://video.example.com/thumb.jpg',
+          length: '5:12',
+          content: 'A quick explanation of photovoltaic cells.',
+          publishedDate: '3 days ago',
+          engine: 'youtube',
+        },
+      ]
+      const videoResults = normalizeSearxngVideoResults(videoItems, 'solar panels work')
+      assert.equal(videoResults.length, 1)
+      assert.equal(videoResults[0].id, 'searxng-vid-1')
+      assert.equal(videoResults[0].title, 'How Solar Panels Work in 5 Minutes')
+      assert.equal(videoResults[0].duration, '5:12')
+      assert.equal(videoResults[0].thumbnailUrl, 'https://video.example.com/thumb.jpg')
+    })
+
+    it('should route news, images, and videos to SearXNG when provider is searxng, and mock fallback for maps/shopping/books', async () => {
+      const { SearchService } = await import('../src/services/search.service.js')
+
+      let requestedCategory = ''
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async (url: any) => {
+          const parsed = new URL(url.toString())
+          requestedCategory = parsed.searchParams.get('categories') || ''
+          return new Response(
+            JSON.stringify({
+              query: 'solar energy',
+              number_of_results: 1,
+              results: [
+                {
+                  title: 'Solar News Story',
+                  url: 'https://news.example.com/solar',
+                  content: 'Solar energy article',
+                  publishedDate: '1 hour ago',
+                  engine: 'google news',
+                },
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const searxngService = new SearchService(undefined, 'searxng')
+
+        // News should route to SearXNG with categories=news
+        const newsRes = await searxngService.search('solar energy', 'news')
+        assert.equal(requestedCategory, 'news')
+        assert.equal(newsRes.provider, 'searxng')
+        assert.equal(newsRes.vertical, 'news')
+        assert.equal(newsRes.isDemo, false)
+
+        // Maps should route to MockSearchProvider with isDemo: true
+        const mapsRes = await searxngService.search('solar installer', 'maps')
+        assert.equal(mapsRes.provider, 'mock-index')
+        assert.equal(mapsRes.vertical, 'maps')
+        assert.equal(mapsRes.isDemo, true)
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+  })
 })
+
 
 
 

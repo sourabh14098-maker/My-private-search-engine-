@@ -31,6 +31,7 @@ export function QuickContextCard({ data }: QuickContextCardProps) {
               alt={data.title}
               className="quick-context-image"
               loading="lazy"
+              referrerPolicy="no-referrer"
             />
           </div>
         )}

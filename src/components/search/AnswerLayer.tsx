@@ -11,7 +11,12 @@ import {
 } from 'lucide-react'
 import type { AIAnswerData } from '../../types'
 import { sanitizeSafeUrl } from '../../utils/url'
-import { parseMarkdownBlocks, renderInlineMarkdown } from '../../utils/markdownParser'
+import {
+  parseMarkdownBlocks,
+  renderInlineMarkdown,
+  evaluateAnswerTruncation,
+  COLLAPSED_HEIGHT_PX,
+} from '../../utils/markdownParser'
 
 interface AnswerLayerProps {
   query: string
@@ -58,17 +63,32 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   )
 }
 
-const COLLAPSED_HEIGHT_PX = 160
-
 export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps) {
-  const [expandedAnswer, setExpandedAnswer] = useState<string | null>(null)
-  const isExpanded = Boolean(answer?.answer && expandedAnswer === answer.answer)
-
+  const [prevProps, setPrevProps] = useState({ query, answerText: answer?.answer })
+  const [isExpanded, setIsExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLElement>(null)
+
+  // Adjust expansion state when query or answer changes per React recommended pattern
+  if (prevProps.query !== query || prevProps.answerText !== answer?.answer) {
+    setPrevProps({ query, answerText: answer?.answer })
+    setIsExpanded(false)
+  }
 
   const handleToggleExpand = () => {
-    setExpandedAnswer(isExpanded ? null : (answer?.answer || ''))
+    if (isExpanded) {
+      setIsExpanded(false)
+      const container = containerRef.current
+      if (container && typeof window !== 'undefined') {
+        const rect = container.getBoundingClientRect()
+        if (rect.top < 0) {
+          container.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }
+    } else {
+      setIsExpanded(true)
+    }
   }
 
   // Measure content overflow dynamically using ResizeObserver
@@ -80,8 +100,9 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
     }
 
     const checkTruncation = () => {
-      // If content scrollHeight exceeds collapsed threshold by at least 24px (~1 line of text)
-      const hasOverflow = el.scrollHeight > COLLAPSED_HEIGHT_PX + 24
+      // Show More / Show Less appears ONLY when the content scrollHeight genuinely exceeds the expansion threshold (340px)
+      // Short answers (<= 280px) and medium answers (280px - 340px) fit naturally within space without a toggle button.
+      const { isTruncated: hasOverflow } = evaluateAnswerTruncation(el.scrollHeight)
       setIsTruncated(hasOverflow)
     }
 
@@ -130,6 +151,7 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
 
   return (
     <section
+      ref={containerRef}
       className={`answer-layer ${status}`}
       aria-label="Direct search answer and source synthesis"
     >
@@ -176,7 +198,7 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
               maxHeight: isTruncated && !isExpanded ? `${COLLAPSED_HEIGHT_PX}px` : undefined,
             }}
           >
-            {parseMarkdownBlocks(answer.answer).map((block, idx) => {
+            {parseMarkdownBlocks(answer.answer, query).map((block, idx) => {
               if (block.type === 'heading') {
                 const HeadingTag = block.level === 2 ? 'h2' : block.level === 4 ? 'h4' : 'h3'
                 return (

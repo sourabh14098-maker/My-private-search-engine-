@@ -19,23 +19,22 @@ export function NewsPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    let cancelled = false
+    if (!query) return
 
-    searchService.news(query)
+    const controller = new AbortController()
+
+    searchService.news(query, controller.signal)
       .then((response) => {
-        if (!cancelled) {
-          setRequest({ query, results: response.results, isDemo: response.isDemo })
-          setError(null)
-        }
+        setRequest({ query, results: response.results, isDemo: response.isDemo })
+        setError(null)
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err?.message || 'Unable to load news results.')
-        }
+        if (err?.name === 'AbortError') return
+        setError(err?.message || 'Unable to load news results.')
       })
 
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [query])
 
@@ -183,7 +182,7 @@ export function NewsPage() {
 
                   {article.imageUrl && (
                     <div className="news-card-thumbnail">
-                      <img src={article.imageUrl} alt="" loading="lazy" />
+                      <img src={article.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
                     </div>
                   )}
                 </div>

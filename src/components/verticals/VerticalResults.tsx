@@ -12,7 +12,7 @@ export function ImageResults({ results, onPreview }: { results: ImageResult[]; o
           onClick={() => onPreview(result)}
           title={`Preview ${result.title} (Sample image)`}
         >
-          <img src={result.imageUrl} alt={result.title} loading="lazy" />
+          <img src={result.imageUrl} alt={result.title} loading="lazy" referrerPolicy="no-referrer" />
           <div className="image-meta-bar">
             <span>{result.title}</span>
             <div className="image-sub-bar">
@@ -46,7 +46,7 @@ export function VideoResults({ results }: { results: VideoResult[] }) {
               }}
             >
               <div className="thumbnail">
-                <img src={result.thumbnailUrl} alt="" loading="lazy" />
+                <img src={result.thumbnailUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
                 <span><Play size={12} fill="currentColor" /> {result.duration}</span>
               </div>
             </a>
@@ -228,7 +228,7 @@ export function ProductResults({ results }: { results: ProductResult[] }) {
         return (
           <article className="product-result" key={result.id}>
             <div className="product-image-wrap">
-              <img src={result.imageUrl} alt="" loading="lazy" />
+              <img src={result.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
               <span className="demo-micro-tag product-overlay-tag">Sample item</span>
             </div>
             <div className="product-body">
