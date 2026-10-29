@@ -9,6 +9,7 @@ import {
   isProgrammingQuery,
   stripModelWrapperTags,
   evaluateAnswerTruncation,
+  verifyAndGroundScientificClaims,
   COLLAPSED_HEIGHT_PX,
   EXPANSION_THRESHOLD_PX,
 } from '../../src/utils/markdownParser.js'
@@ -664,6 +665,47 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       assert.ok(!stripped.includes('</answer>'))
       assert.ok(!stripped.includes('<untrusted_search_results>'))
       assert.equal(stripped, 'Direct answer.')
+    })
+  })
+
+  describe('Scientific Claim Grounding in Markdown Parser & Clean Raw Markdown', () => {
+    it('should replace ungrounded sulfuric acid gas claims in cleanRawMarkdown with verified compounds', () => {
+      const ungroundedInput = 'When cut, the vegetable releases sulfuric acid gas into the surrounding air.'
+      const cleaned = cleanRawMarkdown(ungroundedInput)
+
+      assert.ok(!cleaned.includes('sulfuric acid gas'), 'Must replace ungrounded sulfuric acid gas')
+      assert.ok(cleaned.includes('syn-propanethial-S-oxide') || cleaned.includes('volatile sulfur compound'))
+    })
+
+    it('should preserve legitimate sulfuric acid gas claims when corroborated by sources', () => {
+      const industrialInput = 'Smelting facilities release sulfuric acid gas into scrubbers.'
+      const industrialSources = [
+        {
+          title: 'Sulfuric acid manufacturing',
+          url: 'https://science.org/contact-process',
+          domain: 'science.org',
+          snippet: 'Gaseous streams of sulfur trioxide and sulfuric acid gas are treated in absorption towers.',
+        },
+      ]
+
+      const grounded = verifyAndGroundScientificClaims(industrialInput, industrialSources)
+      assert.ok(grounded.includes('sulfuric acid gas'), 'Legitimate corroborated claims must be preserved')
+    })
+
+    it('should ground uncorroborated chemical mechanisms to source compounds in verifyAndGroundScientificClaims', () => {
+      const input = 'The broken cells emit sulfuric acid gas causing irritation.'
+      const lachrymatorySources = [
+        {
+          title: 'Biochemical Tear Induction',
+          url: 'https://biochem.edu/tears',
+          domain: 'biochem.edu',
+          snippet: 'The enzyme lachrymatory factor synthase produces volatile lachrymatory compound molecules.',
+        },
+      ]
+
+      const grounded = verifyAndGroundScientificClaims(input, lachrymatorySources)
+      assert.ok(!grounded.includes('sulfuric acid gas'))
+      assert.ok(grounded.includes('lachrymatory compound'))
     })
   })
 })

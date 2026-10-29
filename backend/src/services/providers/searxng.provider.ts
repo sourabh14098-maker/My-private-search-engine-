@@ -10,7 +10,14 @@ import type {
   QuickContextData,
   AIAnswerData,
 } from '../../types/api.js'
-import { aiAnswerService, classifyQueryIntent } from '../ai.service.js'
+import {
+  aiAnswerService,
+  classifyQueryIntent,
+  isAuthoritativeSource,
+  isLowQualityDiscussionSource,
+} from '../ai.service.js'
+
+export { isAuthoritativeSource, isLowQualityDiscussionSource }
 
 export interface SearxngResultItem {
   title?: string
@@ -104,14 +111,17 @@ export function canonicalizeUrl(rawUrl?: string): string {
  * - Multi-engine consensus bonus (when multiple engines return the same result)
  * - Exact and token matches in the title
  * - Query token matches in snippet / content
- * - Domain authority boost (official government, educational, encyclopedic, primary sources)
+ * - Domain authority boost (official government, educational, scientific research, encyclopedic sources)
+ * - Intent-sensitive science grounding bonus for scientific explanations
+ * - Demotion of low-quality discussion forums and unvetted blogs
  * - Freshness and recency boost for time-sensitive queries
  */
 export function calculateResultRelevance(
   item: SearxngResultItem,
   queryTokens: string[],
   cleanQuery: string,
-  isTimeSensitive = false
+  isTimeSensitive = false,
+  isScienceQuery = false
 ): number {
   let score = typeof item.score === 'number' && !Number.isNaN(item.score) ? item.score : 1.0
 
@@ -125,38 +135,90 @@ export function calculateResultRelevance(
   const titleLower = (item.title || '').toLowerCase()
   const contentLower = (item.content || item.snippet || '').toLowerCase()
   const urlLower = (item.url || '').toLowerCase()
+  const isDiscussion = isLowQualityDiscussionSource(urlLower)
 
   if (cleanQuery && titleLower.includes(cleanQuery)) {
-    score += 2.5
+    score += isDiscussion ? 0.5 : 2.5
   }
 
   for (const token of queryTokens) {
-    if (titleLower.includes(token)) {
-      score += 0.8
+    const tokenStem = token.length >= 4 && token.endsWith('s') ? token.slice(0, -1) : token
+    if (titleLower.includes(token) || (tokenStem.length >= 4 && titleLower.includes(tokenStem))) {
+      score += isDiscussion ? 0.4 : 0.8
     }
-    if (contentLower.includes(token)) {
+    if (contentLower.includes(token) || (tokenStem.length >= 4 && contentLower.includes(tokenStem))) {
       score += 0.2
     }
   }
 
-  // 1. Domain Authority Boost (official government, educational, encyclopedic, primary sources)
-  if (/\b(?:gov|mil)(?:\.[a-z]{2,3})?\b/i.test(urlLower) || /\.gov\//i.test(urlLower)) {
-    score += 1.5 // Official government sources
-  } else if (/\b(?:edu|ac)(?:\.[a-z]{2,3})?\b/i.test(urlLower) || /\.edu\//i.test(urlLower)) {
-    score += 1.2 // Educational and academic institutions
-  } else if (urlLower.includes('wikipedia.org') || urlLower.includes('britannica.com')) {
-    score += 1.0 // Established encyclopedic references
+  // 1. Domain Authority & Scientific Quality Boost
+  if (/\.(?:gov|mil)(?:\.[a-z]{2,3})?(?:\/|$)/.test(urlLower) || urlLower.includes('.gov/') || urlLower.includes('.mil/')) {
+    score += 2.0 // Official government & public institutions
+    if (isScienceQuery) score += 1.0
+  } else if (/\.(?:edu|ac)(?:\.[a-z]{2,3})?(?:\/|$)/.test(urlLower) || urlLower.includes('.edu/') || urlLower.includes('.ac.')) {
+    score += 1.8 // Academic & higher education institutions
+    if (isScienceQuery) score += 1.0
   } else if (
+    urlLower.includes('nature.com') ||
+    urlLower.includes('science.org') ||
+    urlLower.includes('sciencedirect.com') ||
+    urlLower.includes('ncbi.nlm.nih.gov') ||
+    urlLower.includes('pubmed.ncbi.nlm.nih.gov') ||
+    urlLower.includes('cell.com') ||
+    urlLower.includes('pnas.org') ||
+    urlLower.includes('acs.org') ||
+    urlLower.includes('rsc.org') ||
+    urlLower.includes('royalsocietypublishing.org') ||
+    urlLower.includes('springer.com') ||
+    urlLower.includes('wiley.com') ||
+    urlLower.includes('academic.oup.com') ||
+    urlLower.includes('cambridge.org') ||
+    urlLower.includes('plos.org') ||
+    urlLower.includes('frontiersin.org') ||
+    urlLower.includes('arxiv.org')
+  ) {
+    score += 1.8 // Peer-reviewed scientific & research publishers
+    if (isScienceQuery) score += 1.0
+  } else if (
+    urlLower.includes('scientificamerican.com') ||
+    urlLower.includes('newscientist.com') ||
+    urlLower.includes('phys.org') ||
+    urlLower.includes('nationalgeographic.com') ||
+    urlLower.includes('smithsonianmag.com') ||
+    urlLower.includes('sciencenews.org') ||
+    urlLower.includes('chemistryworld.com') ||
+    urlLower.includes('livescience.com') ||
+    urlLower.includes('sciencefocus.com') ||
+    urlLower.includes('mayoclinic.org') ||
+    urlLower.includes('clevelandclinic.org') ||
+    urlLower.includes('hopkinsmedicine.org') ||
+    urlLower.includes('loc.gov') ||
+    urlLower.includes('wikipedia.org') ||
+    urlLower.includes('britannica.com')
+  ) {
+    score += 1.5 // Established scientific, medical, and encyclopedic authorities
+    if (isScienceQuery) score += 0.8
+  } else if (
+    urlLower.includes('developer.mozilla.org') ||
+    urlLower.includes('docs.python.org') ||
+    urlLower.includes('docs.oracle.com') ||
+    urlLower.includes('learn.microsoft.com') ||
     urlLower.includes('docs.') ||
     urlLower.includes('developer.') ||
-    urlLower.includes('github.com') ||
-    urlLower.includes('nature.com') ||
-    urlLower.includes('science.org')
+    urlLower.includes('github.com')
   ) {
-    score += 0.8 // Primary documentation and science publications
+    score += 1.2 // Primary technical documentation
   }
 
-  // 2. Freshness & Recency Boost (for time-sensitive or current affairs queries)
+  // 2. Demotion for Low-Quality Discussion Forums & Unvetted Blogs
+  if (isLowQualityDiscussionSource(urlLower)) {
+    score -= 1.8
+    if (isScienceQuery) {
+      score -= 0.8 // Strongly discourage unvetted forum speculation for scientific explanations
+    }
+  }
+
+  // 3. Freshness & Recency Boost (for time-sensitive or current affairs queries)
   if (isTimeSensitive) {
     const pubDate = String(item.publishedDate || item.pubdate || '').toLowerCase()
     const currentYear = new Date().getFullYear().toString()
@@ -212,7 +274,9 @@ export function normalizeSearxngWebResults(
 ): WebSearchResult[] {
   const cleanQuery = (query || '').toLowerCase().trim()
   const queryTokens = cleanQuery.split(/\s+/).filter((t) => t.length > 2)
-  const isTimeSensitive = cleanQuery ? classifyQueryIntent(cleanQuery).isTimeSensitive : false
+  const queryAnalysis = cleanQuery ? classifyQueryIntent(cleanQuery) : undefined
+  const isTimeSensitive = queryAnalysis ? queryAnalysis.isTimeSensitive : false
+  const isScienceQuery = queryAnalysis ? queryAnalysis.intent === 'science_education' : false
 
   const dedupMap = new Map<string, { item: SearxngResultItem; engines: Set<string>; calculatedScore: number }>()
 
@@ -225,7 +289,7 @@ export function normalizeSearxngWebResults(
       ? item.engines
       : item.engine ? [item.engine] : []
 
-    const relScore = calculateResultRelevance(item, queryTokens, cleanQuery, isTimeSensitive)
+    const relScore = calculateResultRelevance(item, queryTokens, cleanQuery, isTimeSensitive, isScienceQuery)
 
     const existing = dedupMap.get(canonical)
     if (existing) {

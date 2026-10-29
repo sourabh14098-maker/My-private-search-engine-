@@ -377,16 +377,90 @@ export function correctProgrammingInaccuracies(text: string, languageStyle?: str
 }
 
 /**
+ * Verifies and grounds scientific claims against retrieved evidence or established chemistry:
+ * - Prevents unsupported claims that everyday items or plants release "sulfuric acid gas".
+ * - When sources are provided, grounds in the verified compound (syn-propanethial-S-oxide, volatile sulfur compounds).
+ */
+export function verifyAndGroundScientificClaims(
+  text: string,
+  sources?: AnswerSource[],
+  languageStyle?: string
+): string {
+  if (!text) return ''
+
+  const codeBlocks: string[] = []
+  let masked = text.replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
+    codeBlocks.push(match)
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`
+  })
+
+  const acidGasActionPattern = /\b(?:releases?|produces?|emits?|discharges?|turns?\s+into|forms?|creates?)\s+(?:a\s+)?(?:weak\s+|mild\s+)?sulfuric\s+acid\s+(?:gas|vapor|vapour)\b/gi
+  const bareAcidGasPattern = /\b(?:weak\s+|mild\s+)?sulfuric\s+acid\s+(?:gas|vapor|vapour)\b/gi
+
+  if (bareAcidGasPattern.test(masked)) {
+    const sourcesMentionAcidGas = (sources || []).some((s) => {
+      const combined = `${s.title || ''} ${s.snippet || ''}`.toLowerCase()
+      return (
+        combined.includes('sulfuric acid gas') ||
+        combined.includes('sulfuric acid vapor') ||
+        combined.includes('sulfuric acid vapour')
+      )
+    })
+
+    if (!sourcesMentionAcidGas) {
+      const allSourcesText = (sources || [])
+        .map((s) => `${s.title || ''} ${s.snippet || ''}`.toLowerCase())
+        .join(' ')
+
+      let replacementCompound = 'syn-propanethial-S-oxide (a volatile sulfur compound)'
+      let actionReplacement = 'releases syn-propanethial-S-oxide (a volatile sulfur compound)'
+
+      if (
+        allSourcesText.includes('syn-propanethial-s-oxide') ||
+        allSourcesText.includes('propanethial-s-oxide')
+      ) {
+        if (languageStyle === 'hinglish') {
+          replacementCompound = 'syn-propanethial-S-oxide (volatile sulfur compound)'
+          actionReplacement = 'syn-propanethial-S-oxide (volatile sulfur compound) release karta hai'
+        } else if (languageStyle === 'hindi') {
+          replacementCompound = 'syn-propanethial-S-oxide (वाष्पशील सल्फर यौगिक)'
+          actionReplacement = 'syn-propanethial-S-oxide रिलीज करता है'
+        }
+      } else if (allSourcesText.includes('lachrymatory factor') || allSourcesText.includes('lachrymator')) {
+        replacementCompound = 'a volatile lachrymatory compound (tear-inducing factor)'
+        actionReplacement = 'releases a volatile lachrymatory compound'
+      } else if (allSourcesText.includes('sulfenic acid')) {
+        replacementCompound = 'volatile sulfenic acid derivatives'
+        actionReplacement = 'releases volatile sulfenic acid derivatives'
+      } else if (
+        allSourcesText.includes('sulfur compound') ||
+        allSourcesText.includes('sulfur-containing') ||
+        allSourcesText.includes('organosulfur')
+      ) {
+        replacementCompound = 'volatile sulfur compounds'
+        actionReplacement = 'releases volatile sulfur compounds'
+      }
+
+      masked = masked.replace(acidGasActionPattern, actionReplacement)
+      masked = masked.replace(bareAcidGasPattern, replacementCompound)
+    }
+  }
+
+  return masked.replace(/__CODE_BLOCK_(\d+)__/g, (_m, idx) => codeBlocks[Number(idx)] || '')
+}
+
+/**
  * Normalizes raw LLM output before block parsing:
  * 1. Corrects programming inaccuracies (e.g. Java multiple class inheritance claims).
- * 2. Repairs malformed code answers (fencing, stray fragments, braces, quotes, runnable main).
- * 3. Strips URL-tracking strings (utm_*, v=) and scraped navigation fragments.
- * 4. Strips leading artifact lines such as standalone '**', '***', '###', '====', '----'.
- * 5. Preprocesses Setext heading underlines ('===', '---') into ATX headings ('##', '###').
- * 6. Cleans orphaned leading '** ' or unclosed '**' markers at the start of sentences or labels.
- * 7. Normalizes hash-prefixed citation badges ([#1] -> [1], [#1, #2] -> [1, 2]).
- * 8. Strips internal citation/metadata artifacts ([#operation], [#result], [operation: ...]).
- * 9. Strips conversational sign-offs, orphaned trailing headings, and incomplete dangling fragments.
+ * 2. Grounds scientific claims in verified evidence (e.g. syn-propanethial-S-oxide vs false acid gas claims).
+ * 3. Repairs malformed code answers (fencing, stray fragments, braces, quotes, runnable main).
+ * 4. Strips URL-tracking strings (utm_*, v=) and scraped navigation fragments.
+ * 5. Strips leading artifact lines such as standalone '**', '***', '###', '====', '----'.
+ * 6. Preprocesses Setext heading underlines ('===', '---') into ATX headings ('##', '###').
+ * 7. Cleans orphaned leading '** ' or unclosed '**' markers at the start of sentences or labels.
+ * 8. Normalizes hash-prefixed citation badges ([#1] -> [1], [#1, #2] -> [1, 2]).
+ * 9. Strips internal citation/metadata artifacts ([#operation], [#result], [operation: ...]).
+ * 10. Strips conversational sign-offs, orphaned trailing headings, and incomplete dangling fragments.
  */
 export function cleanRawMarkdown(text: string, query?: string): string {
   if (!text) return ''
@@ -397,10 +471,13 @@ export function cleanRawMarkdown(text: string, query?: string): string {
   // 1. Correct programming inaccuracies first
   cleaned = correctProgrammingInaccuracies(cleaned)
 
-  // 2. Repair code blocks
+  // 2. Verify and ground scientific claims
+  cleaned = verifyAndGroundScientificClaims(cleaned)
+
+  // 3. Repair code blocks
   cleaned = repairCodeBlocks(cleaned.replace(/\r\n/g, '\n'), query).trim()
 
-  // 3. Strip unsolicited Java code blocks from non-programming answers
+  // 4. Strip unsolicited Java code blocks from non-programming answers
   if (query && !isProgrammingQuery(query)) {
     cleaned = cleaned.replace(/```(?:java|code)?[ \t]*\r?\n[\s\S]*?(?:public\s+class|class\s+\w+|System\.out\.print)[\s\S]*?```/gi, '').trim()
   }

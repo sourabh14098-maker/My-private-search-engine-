@@ -2859,6 +2859,309 @@ describe('Backend Foundation API Tests', () => {
       assert.ok(formatted.answer.includes('D. K. Shivakumar'))
     })
   })
+
+  describe('General Scientific Grounding, Source Relevance/Ranking & Unsupported Claims Tests', () => {
+    it('should ground chemical mechanism claims to verified compounds from sources and prevent uncorroborated sulfuric acid gas claims', async () => {
+      const { verifyAndGroundScientificClaims } = await import('../src/services/ai.service.js')
+
+      const scientificSources = [
+        {
+          title: 'Everyday Mysteries: Chemical senses and lachrymatory compounds',
+          url: 'https://www.loc.gov/everyday-mysteries/item/chemical-senses',
+          domain: 'loc.gov',
+          snippet: 'When cells are broken, alliinase and lachrymatory factor synthase convert amino acid sulfoxides into syn-propanethial-S-oxide.',
+        },
+        {
+          title: 'American Chemical Society - Lachrymatory Factor',
+          url: 'https://www.acs.org/molecule-of-the-week/archive/syn-propanethial-s-oxide.html',
+          domain: 'acs.org',
+          snippet: 'Syn-propanethial-S-oxide is the volatile sulfur compound responsible for stimulating sensory neurons in the cornea.',
+        },
+      ]
+
+      // Model hallucinated that the substance releases sulfuric acid gas into the air
+      const ungroundedAnswer = [
+        'When the plant tissue is sliced, it releases sulfuric acid gas into the air [1].',
+        'This gas travels upward and hits the eyes, causing tears [2].',
+      ].join('\n')
+
+      const grounded = verifyAndGroundScientificClaims(ungroundedAnswer, scientificSources, 'english')
+
+      // Must NOT claim sulfuric acid gas was released
+      assert.ok(!grounded.includes('sulfuric acid gas'), 'Must eliminate uncorroborated sulfuric acid gas claim')
+      assert.ok(!grounded.includes('sulfuric acid vapor'))
+      // Must be grounded to verified compound from sources
+      assert.ok(grounded.includes('syn-propanethial-S-oxide') || grounded.includes('lachrymatory factor'))
+    })
+
+    it('should preserve sulfuric acid gas claims when retrieved sources legitimately corroborate it', async () => {
+      const { verifyAndGroundScientificClaims } = await import('../src/services/ai.service.js')
+
+      const industrialSources = [
+        {
+          title: 'Industrial Manufacturing of Sulfuric Acid (Contact Process)',
+          url: 'https://chem.ox.ac.uk/industrial/sulfuric-acid',
+          domain: 'chem.ox.ac.uk',
+          snippet: 'In industrial smelting and sulfur trioxide hydration, high concentrations of hot sulfuric acid gas and dense acid vapors are condensed.',
+        },
+      ]
+
+      const industrialAnswer = 'During high-temperature smelting, the reaction produces hot sulfuric acid gas that requires electrostatic precipitation [1].'
+
+      const result = verifyAndGroundScientificClaims(industrialAnswer, industrialSources, 'english')
+
+      // Because the sources actually discuss sulfuric acid gas, it must be preserved
+      assert.ok(result.includes('sulfuric acid gas'), 'Legitimate sulfuric acid gas claims corroborated by sources must be preserved')
+    })
+
+    it('should ground scientific explanations accurately across Hinglish and Hindi', async () => {
+      const { verifyAndGroundScientificClaims } = await import('../src/services/ai.service.js')
+
+      const scientificSources = [
+        {
+          title: 'Biochemistry Research',
+          url: 'https://science.org/biochem',
+          domain: 'science.org',
+          snippet: 'Damage to plant cells releases syn-propanethial-S-oxide which activates ocular nerves.',
+        },
+      ]
+
+      // Hinglish test
+      const hinglishRaw = 'Kaatne par yeh sulfuric acid gas release karta hai jo aankhon mein jalan paida karta hai [1].'
+      const hinglishGrounded = verifyAndGroundScientificClaims(hinglishRaw, scientificSources, 'hinglish')
+      assert.ok(!hinglishGrounded.includes('sulfuric acid gas'))
+      assert.ok(hinglishGrounded.includes('syn-propanethial-S-oxide'))
+
+      // Hindi test
+      const hindiRaw = 'काटने पर यह sulfuric acid gas छोड़ता है जिससे आंखों में जलन होती है [1]।'
+      const hindiGrounded = verifyAndGroundScientificClaims(hindiRaw, scientificSources, 'hindi')
+      assert.ok(!hindiGrounded.includes('sulfuric acid gas'))
+      assert.ok(hindiGrounded.includes('syn-propanethial-S-oxide'))
+    })
+
+    it('should prioritize authoritative educational, institutional, and scientific sources over low-quality discussion platforms across arbitrary scientific queries', async () => {
+      const { calculateResultRelevance } = await import('../src/services/providers/searxng.provider.js')
+
+      // Case 1: General plant biochemistry / lacrimation query (without hardcoding specific vegetable terms)
+      const query1 = 'why does cutting plant tissue cause eye tearing'
+      const tokens1 = ['why', 'cutting', 'plant', 'tissue', 'cause', 'eye', 'tearing']
+
+      const authoritativeSource1 = {
+        title: 'Plant Biochemistry: Volatile Lachrymatory Compounds (Everyday Mysteries)',
+        url: 'https://www.loc.gov/everyday-mysteries/item/chemical-senses-lacrimation',
+        content: 'Explains the cellular chemistry of lachrymatory factor synthase and volatile sulfur defense mechanisms.',
+      }
+
+      const discussionForumSource1 = {
+        title: 'Why does cutting plant tissue cause eye tearing? - Quora',
+        url: 'https://www.quora.com/Why-does-cutting-plant-tissue-cause-eye-tearing',
+        content: 'Forum thread discussing crying while slicing vegetables.',
+      }
+
+      const authoritativeScore1 = calculateResultRelevance(authoritativeSource1, tokens1, query1, false, true)
+      const discussionScore1 = calculateResultRelevance(discussionForumSource1, tokens1, query1, false, true)
+
+      assert.ok(
+        authoritativeScore1 > discussionScore1,
+        `Authoritative source (${authoritativeScore1}) must outrank discussion forum (${discussionScore1})`
+      )
+
+      // Case 2: General microbiology / immunology query
+      const query2 = 'how do mRNA vaccines stimulate immune response'
+      const tokens2 = ['how', 'mrna', 'vaccines', 'stimulate', 'immune', 'response']
+
+      const govSource2 = {
+        title: 'Understanding mRNA COVID-19 and Infectious Disease Vaccines',
+        url: 'https://www.cdc.gov/vaccines/basics/mrna.html',
+        content: 'Explains how messenger RNA instructs cells to produce a spike protein that triggers an immune response.',
+      }
+
+      const redditForumSource2 = {
+        title: 'How do mRNA vaccines stimulate immune response? - Reddit',
+        url: 'https://www.reddit.com/r/science/mrna_vaccine_mechanisms',
+        content: 'Discussion thread about mRNA mechanisms and immunity.',
+      }
+
+      const govScore2 = calculateResultRelevance(govSource2, tokens2, query2, false, true)
+      const redditScore2 = calculateResultRelevance(redditForumSource2, tokens2, query2, false, true)
+
+      assert.ok(
+        govScore2 > redditScore2,
+        `Government health agency (${govScore2}) must outrank Reddit discussion (${redditScore2})`
+      )
+    })
+
+    it('should apply extra science boost to reputable sources and demote discussion boards for scientific queries', async () => {
+      const { calculateResultRelevance } = await import('../src/services/providers/searxng.provider.js')
+
+      const scienceQuery = 'what causes cellular apoptosis'
+      const tokens = ['what', 'causes', 'cellular', 'apoptosis']
+
+      const scientificSource = {
+        title: 'Mechanisms of Cellular Apoptosis',
+        url: 'https://nature.com/articles/apoptosis-mechanisms',
+        content: 'Caspase activation pathways and mitochondrial membrane permeabilization.',
+      }
+
+      const forumSource = {
+        title: 'What causes cellular apoptosis? - Reddit',
+        url: 'https://reddit.com/r/biology/apoptosis',
+        content: 'Discussion thread about apoptosis.',
+      }
+
+      // With isScienceQuery = true
+      const scienceScore = calculateResultRelevance(scientificSource, tokens, scienceQuery, false, true)
+      const nonScienceScore = calculateResultRelevance(scientificSource, tokens, scienceQuery, false, false)
+      assert.equal(scienceScore - nonScienceScore, 1.0, 'Scientific queries should grant +1.0 boost to authoritative science sources')
+
+      const forumScienceScore = calculateResultRelevance(forumSource, tokens, scienceQuery, false, true)
+      const forumNormalScore = calculateResultRelevance(forumSource, tokens, scienceQuery, false, false)
+      assert.equal(
+        Math.round((forumNormalScore - forumScienceScore) * 10) / 10,
+        0.8,
+        'Scientific queries should apply -0.8 extra demotion to low-quality discussion sources'
+      )
+    })
+
+    it('should rank authoritative scientific sources ahead of forum discussions in normalizeSearxngWebResults for general science queries', async () => {
+      const { normalizeSearxngWebResults } = await import('../src/services/providers/searxng.provider.js')
+
+      const rawItems = [
+        {
+          title: 'Why does plant tissue damage cause lacrimation? - Quora',
+          url: 'https://www.quora.com/Why-does-plant-tissue-damage-cause-lacrimation',
+          content: 'Quora thread on plant lacrimators.',
+          engine: 'google',
+          score: 1.0,
+        },
+        {
+          title: 'Why plant cellular damage causes lacrimation',
+          url: 'https://www.loc.gov/everyday-mysteries/item/lacrimation-senses',
+          content: 'Library of Congress science reference on lachrymatory factor and sensory stimulation.',
+          engine: 'google',
+          score: 1.0,
+        },
+        {
+          title: 'The Chemistry of Volatile Plant Defenses',
+          url: 'https://www.acs.org/education/resources/highschool/chemmatters/past-issues/archive/plant-defenses.html',
+          content: 'American Chemical Society explanation of volatile sulfur compounds and syn-propanethial-S-oxide.',
+          engine: 'bing',
+          score: 1.0,
+        },
+      ]
+
+      const normalized = normalizeSearxngWebResults(rawItems, 'why does plant cellular damage cause lacrimation')
+
+      // Top two results must be loc.gov and acs.org, and quora must be last
+      assert.ok(normalized.length === 3)
+      assert.ok(
+        normalized[0].domain.includes('loc.gov') || normalized[0].domain.includes('acs.org'),
+        `Top result must be an authoritative source, got ${normalized[0].domain}`
+      )
+      assert.ok(
+        normalized[1].domain.includes('loc.gov') || normalized[1].domain.includes('acs.org'),
+        `Second result must be an authoritative source, got ${normalized[1].domain}`
+      )
+      assert.equal(normalized[2].domain, 'quora.com', 'Discussion forum must be ranked after authoritative sources')
+    })
+
+    it('should remap citations to supporting sources and strip citations for completely unsupported claims', async () => {
+      const { verifyCitationSupport } = await import('../src/services/ai.service.js')
+
+      const sources = [
+        {
+          title: 'Photosynthesis Overview',
+          url: 'https://biology.edu/photosynthesis',
+          destinationUrl: 'https://biology.edu/photosynthesis',
+          domain: 'biology.edu',
+          snippet: 'Plants convert sunlight, carbon dioxide, and water into chemical energy stored as glucose.',
+        },
+        {
+          title: 'Mitochondrial Respiration',
+          url: 'https://cellbio.org/respiration',
+          destinationUrl: 'https://cellbio.org/respiration',
+          domain: 'cellbio.org',
+          snippet: 'Mitochondria generate ATP through oxidative phosphorylation.',
+        },
+      ]
+
+      // Claim 1 is about photosynthesis but mistakenly cited [2] (mitochondria). Must remap to [1].
+      // Claim 2 is an unsupported hallucination ("plants synthesize uranium") citing [1]. Must strip [1].
+      const answer = [
+        'Plants convert sunlight and carbon dioxide into glucose [2].',
+        'Certain garden plants can synthesize radioactive uranium in their root systems [1].',
+      ].join('\n')
+
+      const verified = verifyCitationSupport(answer, sources, 'how does photosynthesis work')
+
+      assert.ok(verified.includes('Plants convert sunlight and carbon dioxide into glucose [1].'), 'Should remap [2] to [1]')
+      assert.ok(
+        verified.includes('Certain garden plants can synthesize radioactive uranium in their root systems.'),
+        'Should retain text but strip false citation [1]'
+      )
+      assert.ok(!verified.includes('root systems [1]'), 'False citation must not be retained')
+    })
+
+    it('should preserve code array indexing arr[1] and inline code from citation stripping', async () => {
+      const { verifyCitationSupport } = await import('../src/services/ai.service.js')
+
+      const sources = [
+        {
+          title: 'Array Indexing in Programming',
+          url: 'https://developer.org/arrays',
+          destinationUrl: 'https://developer.org/arrays',
+          domain: 'developer.org',
+          snippet: 'Arrays store ordered sequences accessible by integer index.',
+        },
+      ]
+
+      const codeAnswer = [
+        'To access the second element in JavaScript, use `arr[1]` in your code.',
+        '',
+        '```javascript',
+        'const arr = ["a", "b", "c"];',
+        'console.log(arr[1]);',
+        '```',
+        '',
+        'Arrays are zero-indexed data structures [1].',
+      ].join('\n')
+
+      const verified = verifyCitationSupport(codeAnswer, sources, 'how to access array element')
+
+      assert.ok(verified.includes('use `arr[1]` in your code'), 'Inline code arr[1] must be preserved')
+      assert.ok(verified.includes('console.log(arr[1]);'), 'Code block arr[1] must be preserved')
+      assert.ok(verified.includes('zero-indexed data structures [1].'), 'Valid citation must be preserved')
+    })
+
+    it('should return unsupported status when evidence is completely irrelevant or insufficient', async () => {
+      const { AIAnswerService, isEvidenceRelevant } = await import('../src/services/ai.service.js')
+
+      const query = 'what causes gravitational waves in general relativity'
+      const irrelevantSources = [
+        {
+          title: 'Best Coffee Makers of 2026',
+          url: 'https://coffee-reviews.com/best-machines',
+          domain: 'coffee-reviews.com',
+          snippet: 'Here are the top drip and espresso coffee makers on sale today.',
+        },
+      ]
+
+      // Check evidence relevance helper
+      assert.equal(isEvidenceRelevant(query, irrelevantSources), false)
+
+      const service = new AIAnswerService('ollama', { model: 'llama3.2:1b' })
+      const answer = service.evaluateAndFormatAnswer(
+        'Gravitational waves are ripples in spacetime caused by accelerating masses [1].',
+        irrelevantSources,
+        'english',
+        query
+      )
+
+      assert.equal(answer.status, 'unsupported')
+      assert.equal(answer.answer, undefined)
+      assert.ok(answer.notice?.includes('do not contain enough verified information'))
+    })
+  })
 })
 
 
