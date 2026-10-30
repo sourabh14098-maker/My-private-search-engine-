@@ -2643,12 +2643,13 @@ describe('Backend Foundation API Tests', () => {
 
     it('should route news, images, and videos to SearXNG when provider is searxng, and mock fallback for maps/shopping/books', async () => {
       const { SearchService } = await import('../src/services/search.service.js')
+      const { SearxngSearchProvider } = await import('../src/services/providers/searxng.provider.js')
 
       let requestedCategory = ''
       const originalFetch = globalThis.fetch
       try {
-        globalThis.fetch = async (url: any) => {
-          const parsed = new URL(url.toString())
+        globalThis.fetch = async (input) => {
+          const parsed = new URL(input.toString())
           requestedCategory = parsed.searchParams.get('categories') || ''
           return new Response(
             JSON.stringify({
@@ -2668,7 +2669,8 @@ describe('Backend Foundation API Tests', () => {
           )
         }
 
-        const searxngService = new SearchService(undefined, 'searxng')
+        const searxngProvider = new SearxngSearchProvider('http://localhost:8888')
+        const searxngService = new SearchService(undefined, 'searxng', searxngProvider)
 
         // News should route to SearXNG with categories=news
         const newsRes = await searxngService.search('solar energy', 'news')

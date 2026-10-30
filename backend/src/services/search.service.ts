@@ -16,12 +16,16 @@ export class SearchService {
   private isCustomProvider: boolean
   private activeProviderType?: SearchProviderType
 
-  constructor(customProvider?: SearchProvider, providerType?: SearchProviderType) {
+  constructor(
+    customProvider?: SearchProvider,
+    providerType?: SearchProviderType,
+    searxngProvider?: SearchProvider
+  ) {
     this.isCustomProvider = Boolean(customProvider)
     this.customProvider = customProvider
     this.activeProviderType = providerType
     this.braveProvider = customProvider || new BraveSearchProvider()
-    this.searxngProvider = customProvider || new SearxngSearchProvider()
+    this.searxngProvider = searxngProvider ?? customProvider ?? new SearxngSearchProvider()
     this.mockProvider = MockSearchProvider
   }
 

@@ -610,7 +610,7 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
 
       const list = blocks.find((b) => b.type === 'bullet-list')
       assert.ok(list?.items && list.items.length === 2)
-      assert.ok(list?.items[0].includes('O(log n)'))
+      assert.ok(list?.items?.[0]?.includes('O(log n)'))
     })
 
     it('should preserve and resolve citations [1] and [2] cleanly across multi-paragraph answers', () => {
