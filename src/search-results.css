@@ -2043,6 +2043,43 @@
   cursor: default;
 }
 
+.answer-table-wrapper {
+  overflow-x: auto;
+  margin: 12px 0 16px 0;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.answer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.answer-table th {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f3f4f6;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.answer-table td {
+  padding: 8px 12px;
+  color: #d1d5db;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.answer-table tr:last-child td {
+  border-bottom: none;
+}
+
+.answer-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .answer-markdown-text {
   position: relative;
   transition: max-height 0.28s cubic-bezier(0.16, 1, 0.3, 1);

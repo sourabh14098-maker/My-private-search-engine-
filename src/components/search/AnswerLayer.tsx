@@ -240,6 +240,34 @@ export function AnswerLayer({ query, answer, loading = false }: AnswerLayerProps
                   </ul>
                 )
               }
+              if (block.type === 'table' && block.headers && block.rows) {
+                return (
+                  <div key={`table-wrap-${idx}`} className="answer-table-wrapper">
+                    <table className="answer-table">
+                      <thead>
+                        <tr>
+                          {block.headers.map((h, hIdx) => (
+                            <th key={`th-${hIdx}`}>
+                              {renderInlineMarkdown(h, sources)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {block.rows.map((row, rIdx) => (
+                          <tr key={`tr-${rIdx}`}>
+                            {row.map((cell, cIdx) => (
+                              <td key={`td-${rIdx}-${cIdx}`}>
+                                {renderInlineMarkdown(cell, sources)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              }
               return (
                 <p key={`p-${idx}`} className="answer-paragraph">
                   {renderInlineMarkdown(block.text || '', sources)}

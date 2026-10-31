@@ -75,17 +75,25 @@ export interface SearxngRawResponse {
  */
 export function canonicalizeUrl(rawUrl?: string): string {
   if (!rawUrl || typeof rawUrl !== 'string') return ''
+  const trimmed = rawUrl.trim().replace(/[.,;:!>]+$/, '')
+  if (!trimmed) return ''
   try {
-    const parsed = new URL(rawUrl.trim())
+    const parsed = new URL(trimmed)
     const host = parsed.hostname.toLowerCase().replace(/^www\./, '')
     if ((parsed.protocol === 'http:' && parsed.port === '80') || (parsed.protocol === 'https:' && parsed.port === '443')) {
       parsed.port = ''
     }
-    const trackingExact = new Set(['gclid', 'fbclid', 'ref', 'source', 'v', '_ga', 'ncid', 'msclkid'])
+    const isYouTube = /(?:^|\.)(?:youtube\.com|youtu\.be)$/i.test(host)
+    const trackingExact = new Set(['gclid', 'fbclid', 'ref', 'source', '_ga', 'ncid', 'msclkid', 'ref_src', 'yclid', 'wickedid', 'rb_clickid'])
     const toDelete: string[] = []
     parsed.searchParams.forEach((_val, key) => {
       const lower = key.toLowerCase()
-      if (trackingExact.has(lower) || lower.startsWith('utm_') || lower.startsWith('mc_')) {
+      if (
+        trackingExact.has(lower) ||
+        lower.startsWith('utm_') ||
+        lower.startsWith('mc_') ||
+        (lower === 'v' && !isYouTube)
+      ) {
         toDelete.push(key)
       }
     })
@@ -101,7 +109,7 @@ export function canonicalizeUrl(rawUrl?: string): string {
     const search = parsed.searchParams.toString()
     return `${parsed.protocol}//${host}${parsed.pathname}${search ? '?' + search : ''}`
   } catch {
-    return rawUrl.trim().toLowerCase()
+    return trimmed.toLowerCase()
   }
 }
 

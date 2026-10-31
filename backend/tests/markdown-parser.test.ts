@@ -10,9 +10,13 @@ import {
   stripModelWrapperTags,
   evaluateAnswerTruncation,
   verifyAndGroundScientificClaims,
+  parseTableRow,
+  isTableDelimiter,
+  stripTrailingReferenceSections,
   COLLAPSED_HEIGHT_PX,
   EXPANSION_THRESHOLD_PX,
 } from '../../src/utils/markdownParser.js'
+import { cleanUrlTrackingParams } from '../../src/utils/url.js'
 import type { AnswerSource } from '../../src/types.js'
 
 describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
@@ -706,6 +710,125 @@ describe('DitchX Frontend Markdown Parser & Robustness Tests', () => {
       const grounded = verifyAndGroundScientificClaims(input, lachrymatorySources)
       assert.ok(!grounded.includes('sulfuric acid gas'))
       assert.ok(grounded.includes('lachrymatory compound'))
+    })
+  })
+
+  describe('Markdown Table Parsing & Cell Formatting', () => {
+    it('should correctly parse table rows and identify delimiter lines', () => {
+      assert.deepEqual(parseTableRow('| Col 1 | Col 2 | Col 3 |'), ['Col 1', 'Col 2', 'Col 3'])
+      assert.deepEqual(parseTableRow('Feature | Value'), ['Feature', 'Value'])
+      assert.deepEqual(parseTableRow('| Escaped \\| Pipe | Detail |'), ['Escaped | Pipe', 'Detail'])
+
+      assert.equal(isTableDelimiter('| --- | --- |'), true)
+      assert.equal(isTableDelimiter('| :--- | :---: | ---: |'), true)
+      assert.equal(isTableDelimiter('--- | ---'), true)
+      assert.equal(isTableDelimiter('| Not a delimiter |'), false)
+      assert.equal(isTableDelimiter('Just regular text'), false)
+    })
+
+    it('should parse markdown tables into structured table blocks', () => {
+      const markdownWithTable = [
+        '### HTTP Methods Overview',
+        'Here is a quick summary of standard methods:',
+        '',
+        '| Method | Idempotent | Safe | Description |',
+        '| :--- | :---: | :---: | :--- |',
+        '| `GET` | Yes | Yes | Read-only resource retrieval [1] |',
+        '| `POST` | No | No | Create resource or execute operation [2] |',
+        '| `PUT` | Yes | No | Replace resource state [1] |',
+        '',
+        'Follow REST standards for consistent API design.',
+      ].join('\n')
+
+      const blocks = parseMarkdownBlocks(markdownWithTable, 'HTTP methods')
+      const tableBlock = blocks.find((b) => b.type === 'table')
+
+      assert.ok(tableBlock, 'Table block must be extracted')
+      assert.deepEqual(tableBlock?.headers, ['Method', 'Idempotent', 'Safe', 'Description'])
+      assert.equal(tableBlock?.rows?.length, 3)
+      assert.deepEqual(tableBlock?.rows?.[0], ['`GET`', 'Yes', 'Yes', 'Read-only resource retrieval [1]'])
+      assert.deepEqual(tableBlock?.rows?.[1], ['`POST`', 'No', 'No', 'Create resource or execute operation [2]'])
+      assert.deepEqual(tableBlock?.rows?.[2], ['`PUT`', 'Yes', 'No', 'Replace resource state [1]'])
+
+      // Check surrounding blocks
+      assert.equal(blocks[0].type, 'heading')
+      assert.equal(blocks[1].type, 'paragraph')
+      assert.equal(blocks[3].type, 'paragraph')
+    })
+
+    it('should render citations and inline code within table cell text', () => {
+      const cellText = 'Read-only resource retrieval [1] and `id`'
+      const rendered = renderInlineMarkdown(cellText, mockSources)
+
+      assert.ok(rendered.some((n: any) => n && typeof n === 'object' && n.key?.startsWith('cite-group')), 'Citation rendered')
+      assert.ok(rendered.some((n: any) => n && typeof n === 'object' && n.key?.startsWith('code-')), 'Inline code rendered')
+    })
+  })
+
+  describe('Trailing Redundant Reference Section Removal', () => {
+    it('should strip trailing ### References and Sources sections duplicated from UI', () => {
+      const withTrailingRefs = [
+        'Tokyo is the capital of Japan [1].',
+        'It is the most populous metropolitan area in the world [2].',
+        '',
+        '### References',
+        '[1] https://en.wikipedia.org/wiki/Tokyo',
+        '[2] https://www.britannica.com/place/Tokyo',
+      ].join('\n')
+
+      const cleaned = stripTrailingReferenceSections(withTrailingRefs)
+      assert.ok(!cleaned.includes('### References'))
+      assert.ok(!cleaned.includes('https://en.wikipedia.org/wiki/Tokyo'))
+      assert.ok(cleaned.includes('Tokyo is the capital of Japan [1].'))
+      assert.ok(cleaned.includes('It is the most populous metropolitan area in the world [2].'))
+    })
+
+    it('should strip trailing **Sources:** list formatted as numbers or bullets', () => {
+      const withTrailingSources = [
+        'Photosynthesis converts sunlight into chemical energy [1].',
+        '',
+        '**Sources:**',
+        '1. https://biology.edu/photosynthesis',
+        '2. https://nature.com/articles/plants',
+      ].join('\n')
+
+      const cleaned = stripTrailingReferenceSections(withTrailingSources)
+      assert.ok(!cleaned.includes('**Sources:**'))
+      assert.ok(!cleaned.includes('https://biology.edu'))
+      assert.ok(cleaned.includes('Photosynthesis converts sunlight into chemical energy [1].'))
+    })
+
+    it('should preserve substantive discussions of references in text', () => {
+      const referenceDiscussion = [
+        '### Java Reference Types',
+        'Java supports strong, soft, weak, and phantom references.',
+        'Soft references are designed for memory-sensitive caches.',
+        'Weak references do not prevent garbage collection.',
+      ].join('\n')
+
+      const cleaned = stripTrailingReferenceSections(referenceDiscussion)
+      assert.equal(cleaned, referenceDiscussion, 'Must not strip substantive educational text on references')
+    })
+  })
+
+  describe('YouTube URL & Parameter Sanitization Integrity', () => {
+    it('should preserve YouTube video ID (v=) while removing tracking parameters', () => {
+      const ytUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&utm_source=twitter&utm_medium=social&fbclid=12345'
+      const cleaned = cleanUrlTrackingParams(ytUrl)
+
+      assert.ok(cleaned.includes('v=dQw4w9WgXcQ'), 'YouTube video ID must be preserved')
+      assert.ok(!cleaned.includes('utm_source'), 'utm_source must be stripped')
+      assert.ok(!cleaned.includes('fbclid'), 'fbclid must be stripped')
+    })
+
+    it('should trim trailing punctuation attached to URLs without damaging valid paths', () => {
+      const urlWithParen = 'https://en.wikipedia.org/wiki/Tokyo).'
+      const cleanedParen = cleanUrlTrackingParams(urlWithParen)
+      assert.equal(cleanedParen, 'https://en.wikipedia.org/wiki/Tokyo')
+
+      const urlWithComma = 'https://example.com/guide,'
+      const cleanedComma = cleanUrlTrackingParams(urlWithComma)
+      assert.equal(cleanedComma, 'https://example.com/guide')
     })
   })
 })

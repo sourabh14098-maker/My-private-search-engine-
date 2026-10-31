@@ -25,12 +25,18 @@ const TRACKING_PARAMS = new Set([
  */
 export function cleanUrlTrackingParams(rawUrl?: string): string {
   if (!rawUrl || typeof rawUrl !== 'string') return ''
-  const trimmed = rawUrl.trim()
+  let trimmed = rawUrl.trim().replace(/[.,;:!>]+$/, '')
   if (!trimmed) return ''
+  const openParen = (trimmed.match(/\(/g) || []).length
+  const closeParen = (trimmed.match(/\)/g) || []).length
+  if (closeParen > openParen && trimmed.endsWith(')')) {
+    trimmed = trimmed.slice(0, -1).replace(/[.,;:!>]+$/, '')
+  }
 
   try {
     const isAbsolute = /^https?:\/\//i.test(trimmed)
     const url = new URL(trimmed, 'https://placeholder.domain')
+    const isYouTube = /(?:^|\.)(?:youtube\.com|youtu\.be)$/i.test(url.hostname)
 
     const keysToRemove: string[] = []
     url.searchParams.forEach((_val, key) => {
@@ -38,10 +44,7 @@ export function cleanUrlTrackingParams(rawUrl?: string): string {
       if (
         TRACKING_PARAMS.has(lower) ||
         lower.startsWith('utm_') ||
-        (lower === 'v' &&
-          url.hostname !== 'www.youtube.com' &&
-          url.hostname !== 'youtube.com' &&
-          url.hostname !== 'm.youtube.com')
+        (lower === 'v' && !isYouTube)
       ) {
         keysToRemove.push(key)
       }
@@ -57,8 +60,12 @@ export function cleanUrlTrackingParams(rawUrl?: string): string {
     }
     return cleaned
   } catch {
+    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(trimmed)
+    const pattern = isYouTube
+      ? /[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid)=[^&\s)"']*/gi
+      : /[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid|v)=[^&\s)"']*/gi
     return trimmed
-      .replace(/[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid|v)=[^&\s)"']*/gi, '')
+      .replace(pattern, '')
       .replace(/\?&/g, '?')
       .replace(/[?&]$/, '')
   }

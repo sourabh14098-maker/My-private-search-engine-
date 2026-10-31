@@ -3164,6 +3164,182 @@ describe('Backend Foundation API Tests', () => {
       assert.ok(answer.notice?.includes('do not contain enough verified information'))
     })
   })
+
+  describe('DitchX End-to-End Pipeline Robustness & Regression Suite', () => {
+    it('should preserve YouTube video ID (v=) in SearXNG canonicalizeUrl while stripping tracking parameters', async () => {
+      const { canonicalizeUrl } = await import('../src/services/providers/searxng.provider.js')
+
+      const ytUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&utm_source=newsletter&fbclid=abc123'
+      const canonical = canonicalizeUrl(ytUrl)
+
+      assert.ok(canonical.includes('youtube.com/watch?v=dQw4w9WgXcQ'), 'Video ID must be preserved in canonical URL')
+      assert.ok(!canonical.includes('utm_source'), 'utm_source must be stripped')
+      assert.ok(!canonical.includes('fbclid'), 'fbclid must be stripped')
+    })
+
+    it('should handle multilingual, Unicode, and unusual queries safely in validateSearchRequest', async () => {
+      const { validateSearchRequest } = await import('../src/middleware/validateSearch.js')
+
+      // 1. Multilingual queries: Hindi, Japanese, Chinese, Arabic, emojis
+      const multilingualQueries = [
+        'भारत की राजधानी क्या है?',
+        '東京の天気予報',
+        '量子计算原理',
+        'ما هي عاصمة اليابان؟',
+        'weather in Tokyo ☀️ 🗼',
+      ]
+
+      for (const q of multilingualQueries) {
+        let nextCalled = false
+        const req: any = { query: { q } }
+        const res: any = {
+          status: () => res,
+          json: () => res,
+        }
+        validateSearchRequest(req, res, () => {
+          nextCalled = true
+        })
+
+        assert.equal(nextCalled, true, `Multilingual query "${q}" must pass validation`)
+        assert.equal(req.query.q, q, `Query content must be preserved exactly for "${q}"`)
+      }
+
+      // 2. Control characters stripped cleanly
+      let controlNextCalled = false
+      const controlReq: any = { query: { q: 'Tokyo\x00\x08 capital\x1F of Japan' } }
+      const res: any = {
+        status: () => res,
+        json: () => res,
+      }
+      validateSearchRequest(controlReq, res, () => {
+        controlNextCalled = true
+      })
+      assert.equal(controlNextCalled, true)
+      assert.equal(controlReq.query.q, 'Tokyo capital of Japan', 'Control characters must be sanitized')
+
+      // 3. Query containing only control characters or whitespace rejected
+      let rejectedStatusCode = 0
+      let rejectedJson: any = null
+      const rejectReq: any = { query: { q: '\x00\x08   \x1F' } }
+      const rejectRes: any = {
+        status: (code: number) => {
+          rejectedStatusCode = code
+          return rejectRes
+        },
+        json: (data: any) => {
+          rejectedJson = data
+          return rejectRes
+        },
+      }
+      validateSearchRequest(rejectReq, rejectRes, () => {})
+      assert.equal(rejectedStatusCode, 400)
+      assert.equal(rejectedJson?.code, 'INVALID_QUERY')
+    })
+
+    it('should deduplicate candidate sources with identical canonical URLs and remap citations in evaluateAndFormatAnswer', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', { model: 'llama3.2:1b' })
+
+      // Duplicate URLs with different tracking params or formatting
+      const candidateSources = [
+        {
+          title: 'Tokyo Info',
+          url: 'https://en.wikipedia.org/wiki/Tokyo?utm_source=search',
+          destinationUrl: 'https://en.wikipedia.org/wiki/Tokyo?utm_source=search',
+          domain: 'wikipedia.org',
+          snippet: 'Tokyo is the capital of Japan and the world most populous metropolis.',
+        },
+        {
+          title: 'Japan Guide',
+          url: 'https://www.japan-guide.com/e/e2164.html',
+          destinationUrl: 'https://www.japan-guide.com/e/e2164.html',
+          domain: 'japan-guide.com',
+          snippet: 'Tokyo is Japan capital and the country most populous prefecture.',
+        },
+        {
+          title: 'Wikipedia Tokyo Duplicate',
+          url: 'https://en.wikipedia.org/wiki/Tokyo?utm_medium=feed',
+          destinationUrl: 'https://en.wikipedia.org/wiki/Tokyo?utm_medium=feed',
+          domain: 'wikipedia.org',
+          snippet: 'Tokyo is the capital of Japan.',
+        },
+      ]
+
+      // Source [3] is a duplicate of Source [1] (same canonical Wikipedia URL)
+      const rawAnswer = 'Tokyo is the capital of Japan [1]. It is Japan most populous prefecture [2]. It is widely recognized [3].'
+      const formatted = service.evaluateAndFormatAnswer(rawAnswer, candidateSources as any, 'english', 'What is the capital of Japan?')
+
+      assert.equal(formatted.status, 'ready')
+      // Sources list must be deduplicated
+      assert.equal(formatted.sources?.length, 2, 'Duplicate URLs must be deduplicated into 2 unique sources')
+      // Citation [3] should be mapped to [1]
+      assert.ok(!formatted.answer?.includes('[3]'), 'Duplicate source citation [3] must not appear in answer')
+      assert.ok(formatted.answer?.includes('[1]'), 'Canonical citation [1] must be preserved')
+    })
+
+    it('should provide graceful fallbacks for candidate sources missing titles or domains', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', { model: 'llama3.2:1b' })
+
+      const sourcesWithMissingFields = [
+        {
+          title: '', // Missing title
+          url: 'https://developer.mozilla.org/en-US/docs/Web/HTTP',
+          destinationUrl: 'https://developer.mozilla.org/en-US/docs/Web/HTTP',
+          domain: '', // Missing domain
+          snippet: 'HTTP is a protocol for fetching resources such as HTML documents.',
+        },
+      ]
+
+      const formatted = service.evaluateAndFormatAnswer(
+        'HTTP is a client-server protocol [1].',
+        sourcesWithMissingFields as any,
+        'english',
+        'What is HTTP protocol?'
+      )
+
+      assert.equal(formatted.status, 'ready')
+      assert.ok(formatted.sources && formatted.sources.length === 1)
+      const src = formatted.sources[0]
+      assert.equal(src.domain, 'developer.mozilla.org', 'Domain should be extracted from destination URL')
+      assert.ok(src.title.length > 0, 'Title should have fallback')
+    })
+
+    it('should strip trailing redundant references section from evaluateAndFormatAnswer', async () => {
+      const { AIAnswerService } = await import('../src/services/ai.service.js')
+      const service = new AIAnswerService('ollama', { model: 'llama3.2:1b' })
+
+      const sources = [
+        {
+          title: 'Tokyo Facts',
+          url: 'https://britannica.com/place/Tokyo',
+          destinationUrl: 'https://britannica.com/place/Tokyo',
+          domain: 'britannica.com',
+          snippet: 'Tokyo is the capital of Japan and an international financial center.',
+        },
+      ]
+
+      const rawWithRedundantReferences = [
+        'Tokyo is the capital of Japan [1].',
+        '',
+        '### References',
+        '[1] https://britannica.com/place/Tokyo',
+      ].join('\n')
+
+      const formatted = service.evaluateAndFormatAnswer(
+        rawWithRedundantReferences,
+        sources as any,
+        'english',
+        'What is the capital of Japan?'
+      )
+
+      assert.equal(formatted.status, 'ready')
+      assert.ok(!formatted.answer?.includes('### References'), 'Trailing ### References must be stripped')
+      assert.ok(!formatted.answer?.includes('https://britannica.com'), 'Trailing URLs must be stripped')
+      assert.ok(formatted.answer?.includes('Tokyo is the capital of Japan [1].'))
+      assert.equal(formatted.sources?.length, 1, 'Sources cited array must be preserved for UI')
+    })
+  })
 })
 
 

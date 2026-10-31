@@ -3,12 +3,14 @@ import type { AnswerSource } from '../types'
 import { sanitizeSafeUrl, cleanUrlTrackingParams } from './url'
 
 export interface MarkdownBlock {
-  type: 'heading' | 'numbered-list' | 'bullet-list' | 'paragraph' | 'code-block'
+  type: 'heading' | 'numbered-list' | 'bullet-list' | 'paragraph' | 'code-block' | 'table'
   level?: number
   items?: string[]
   text?: string
   code?: string
   language?: string
+  headers?: string[]
+  rows?: string[][]
 }
 
 export const COLLAPSED_HEIGHT_PX = 280
@@ -450,6 +452,67 @@ export function verifyAndGroundScientificClaims(
 }
 
 /**
+ * Splits a markdown table row by unescaped pipe characters (|).
+ */
+export function parseTableRow(line: string): string[] {
+  let trimmed = line.trim()
+  if (trimmed.startsWith('|')) trimmed = trimmed.slice(1)
+  if (trimmed.endsWith('|') && !trimmed.endsWith('\\|')) trimmed = trimmed.slice(0, -1)
+  return trimmed
+    .split(/(?<!\\)\|/)
+    .map((cell) => cell.trim().replace(/\\\|/g, '|'))
+}
+
+/**
+ * Checks if a line matches a markdown table delimiter row (e.g. | --- | :---: | ---: |).
+ */
+export function isTableDelimiter(line: string): boolean {
+  return /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line)
+}
+
+/**
+ * Strips trailing redundant References or Sources sections emitted by LLMs
+ * (e.g. "### References\n[1] ...\n[2] ..." or "**Sources:**\n1. ...")
+ * so the interactive Sources Cited UI is not duplicated by raw text.
+ */
+export function stripTrailingReferenceSections(text: string): string {
+  if (!text) return ''
+
+  // Isolate code blocks
+  const codeBlocks: string[] = []
+  const masked = text.replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
+    codeBlocks.push(match)
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`
+  })
+
+  // Match trailing References / Sources / Citations heading
+  const refHeaderRegex = /(?:^|\r?\n)(?:#{1,6}\s*(?:References?|Sources?|Citations?|Works\s+Cited|Bibliography)\b[^\r\n]*|\*\*(?:References?|Sources?|Citations?|Works\s+Cited|Bibliography):?\*\*[^\r\n]*|(?:References?|Sources?|Citations?|Works\s+Cited|Bibliography):\s*)([\s\S]*)$/i
+
+  const match = masked.match(refHeaderRegex)
+  if (match) {
+    const trailingBody = match[1].trim()
+    const trailingLines = trailingBody.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    const isAllRefLines = trailingLines.length === 0 || trailingLines.every((line) => {
+      return (
+        /^\[\d+\]/.test(line) ||
+        /^\d+\.\s+/.test(line) ||
+        /^[-*•]\s+/.test(line) ||
+        /https?:\/\//i.test(line) ||
+        /^\[[^\]]+\]\(/i.test(line)
+      )
+    })
+
+    if (isAllRefLines) {
+      const cutIndex = match.index!
+      const beforeRef = masked.slice(0, cutIndex).trim()
+      return beforeRef.replace(/__CODE_BLOCK_(\d+)__/g, (_m, idx) => codeBlocks[Number(idx)] || '')
+    }
+  }
+
+  return text
+}
+
+/**
  * Normalizes raw LLM output before block parsing:
  * 1. Corrects programming inaccuracies (e.g. Java multiple class inheritance claims).
  * 2. Grounds scientific claims in verified evidence (e.g. syn-propanethial-S-oxide vs false acid gas claims).
@@ -494,7 +557,7 @@ export function cleanRawMarkdown(text: string, query?: string): string {
     .replace(/https?:\/\/[^\s)]+/g, (url) => cleanUrlTrackingParams(url))
     .replace(/[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid)=[^&\s)"']*/gi, '')
     .replace(/\b(?:utm_source|utm_medium|utm_campaign|utm_term|utm_content)\s*=\s*[^\s&)"']+/gi, '')
-    .replace(/[?&]v=[a-zA-Z0-9_%-]+/gi, '')
+    .replace(/(?<!youtube\.com\/watch|\/watch)[?&]v=[a-zA-Z0-9_%-]+/gi, '')
     .replace(/(?:^|\s)v=[a-zA-Z0-9_%-]{6,}(?:\s|$)/g, ' ')
     // Strip accidental URL fragments copied from search snippets (e.g. com/courses/java-spring-boot-0-to-100/)
     .replace(/(?<![`@.:/a-zA-Z0-9_-])(?:com|org|net|edu|gov|io|ai|app|dev|co\.[a-z]{2})\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
@@ -505,6 +568,10 @@ export function cleanRawMarkdown(text: string, query?: string): string {
     .replace(/(?:^|\s*)(?:(?:accept(?:\s+all)?\s+cookies|cookie\s+policy|cookies\s+notice)\b[^.\n\r]*[.:;]?\s*)/gi, ' ')
     .replace(/(?:^|[\s.;•·|])(?:home|index)\s*(?:[>»/|]|&gt;)\s*[A-Za-z0-9\s_-]+(?:\s*(?:[>»/|]|&gt;)\s*[A-Za-z0-9\s_-]+)*[.:;]?\s*/gi, ' ')
     .replace(/(?:all\s+rights\s+reserved|copyright\s+©?\s*\d{4})\b[^.\n\r]*[.]?/gi, '')
+    // Strip raw prompt markers leaking from LLM
+    .replace(/\[\/?INST\]/g, '')
+    .replace(/<<\/?SYS>>/g, '')
+    .replace(/^(?:System|Assistant|Human|User):\s*/gmi, '')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\s+([.,;:!?])/g, '$1')
 
@@ -554,6 +621,9 @@ export function cleanRawMarkdown(text: string, query?: string): string {
     }
   }
   cleaned = lines.join('\n').trim()
+
+  // 8.5. Strip trailing redundant reference or source sections
+  cleaned = stripTrailingReferenceSections(cleaned)
 
   // 9. Clean conversational sign-offs at the end of the text
   const trailingFillerPatterns = [
@@ -703,6 +773,40 @@ export function parseMarkdownBlocks(rawText: string, query?: string): MarkdownBl
     // 3. Skip standalone markdown horizontal rules
     if (/^[-*_]{3,}$/.test(trimmed)) {
       flushBlock()
+      continue
+    }
+
+    // 3.5. Markdown Tables: header row followed by table delimiter (| --- | --- |)
+    if (
+      rawLine.includes('|') &&
+      i + 1 < lines.length &&
+      isTableDelimiter(lines[i + 1])
+    ) {
+      flushBlock()
+      const headers = parseTableRow(rawLine)
+      i++ // Advance past delimiter line
+      const rows: string[][] = []
+
+      while (i + 1 < lines.length) {
+        const nextLine = lines[i + 1]
+        const nextTrimmed = nextLine.trim()
+        if (
+          !nextTrimmed ||
+          !nextLine.includes('|') ||
+          nextLine.startsWith('```') ||
+          /^#{1,6}\s/.test(nextTrimmed)
+        ) {
+          break
+        }
+        i++
+        rows.push(parseTableRow(nextLine))
+      }
+
+      blocks.push({
+        type: 'table',
+        headers,
+        rows,
+      })
       continue
     }
 
@@ -911,7 +1015,7 @@ export function renderInlineMarkdown(text: string, sources: AnswerSource[]): Rea
       .replace(/\*\*/g, '')
       .replace(/[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid)=[^&\s)"']*/gi, '')
       .replace(/\b(?:utm_source|utm_medium|utm_campaign|utm_term|utm_content)\s*=\s*[^\s&)"']+/gi, '')
-      .replace(/[?&]v=[a-zA-Z0-9_%-]+/gi, '')
+      .replace(/(?<!youtube\.com\/watch|\/watch)[?&]v=[a-zA-Z0-9_%-]+/gi, '')
       .replace(/(?:^|\s)v=[a-zA-Z0-9_%-]{6,}(?:\s|$)/g, ' ')
       .replace(/(?<![`@.:/a-zA-Z0-9_-])(?:com|org|net|edu|gov|io|ai|app|dev|co\.[a-z]{2})\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
       .replace(/(?<![a-zA-Z0-9_])(?:\.{2,3}|…|[›>»])\s*(?:[a-zA-Z0-9_-]+\.)*(?:com|org|net|edu|gov|io|ai|app|dev)?\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')

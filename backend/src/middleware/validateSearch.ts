@@ -28,7 +28,9 @@ export function validateSearchRequest(req: Request, res: Response, next: NextFun
     return
   }
 
-  const query = queryParam.trim()
+  // Sanitize non-printable control characters while preserving valid multilingual Unicode (Hindi, CJK, Arabic, etc.) and punctuation
+  // eslint-disable-next-line no-control-regex
+  const query = queryParam.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
 
   if (query.length === 0) {
     res.status(400).json({

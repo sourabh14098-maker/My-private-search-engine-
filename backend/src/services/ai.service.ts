@@ -529,12 +529,18 @@ const TRACKING_PARAMS = new Set([
  */
 export function cleanUrlTrackingParams(urlStr: string): string {
   if (!urlStr || typeof urlStr !== 'string') return urlStr || ''
-  const trimmed = urlStr.trim()
+  let trimmed = urlStr.trim().replace(/[.,;:!>]+$/, '')
   if (!trimmed) return ''
+  const openParen = (trimmed.match(/\(/g) || []).length
+  const closeParen = (trimmed.match(/\)/g) || []).length
+  if (closeParen > openParen && trimmed.endsWith(')')) {
+    trimmed = trimmed.slice(0, -1).replace(/[.,;:!>]+$/, '')
+  }
 
   try {
     const isAbsolute = /^https?:\/\//i.test(trimmed)
     const url = new URL(trimmed, 'https://placeholder.domain')
+    const isYouTube = /(?:^|\.)(?:youtube\.com|youtu\.be)$/i.test(url.hostname)
 
     const keysToRemove: string[] = []
     url.searchParams.forEach((_val, key) => {
@@ -542,10 +548,7 @@ export function cleanUrlTrackingParams(urlStr: string): string {
       if (
         TRACKING_PARAMS.has(lower) ||
         lower.startsWith('utm_') ||
-        (lower === 'v' &&
-          url.hostname !== 'www.youtube.com' &&
-          url.hostname !== 'youtube.com' &&
-          url.hostname !== 'm.youtube.com')
+        (lower === 'v' && !isYouTube)
       ) {
         keysToRemove.push(key)
       }
@@ -561,8 +564,12 @@ export function cleanUrlTrackingParams(urlStr: string): string {
     }
     return cleaned
   } catch {
+    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(trimmed)
+    const pattern = isYouTube
+      ? /[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid)=[^&\s)"']*/gi
+      : /[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid|v)=[^&\s)"']*/gi
     return trimmed
-      .replace(/[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid|v)=[^&\s)"']*/gi, '')
+      .replace(pattern, '')
       .replace(/\?&/g, '?')
       .replace(/[?&]$/, '')
   }
@@ -638,7 +645,7 @@ export function cleanAnswerNoise(text: string): string {
     // Strip raw URL tracking tokens e.g. utm_source=..., utm_medium=..., [?&]v=...
     .replace(/[?&](?:utm_[a-zA-Z0-9_]+|fbclid|gclid|msclkid)=[^&\s)"']*/gi, '')
     .replace(/\b(?:utm_source|utm_medium|utm_campaign|utm_term|utm_content)\s*=\s*[^\s&)"']+/gi, '')
-    .replace(/[?&]v=[a-zA-Z0-9_%-]+/gi, '')
+    .replace(/(?<!youtube\.com\/watch|\/watch)[?&]v=[a-zA-Z0-9_%-]+/gi, '')
     .replace(/(?:^|\s)v=[a-zA-Z0-9_%-]{6,}(?:\s|$)/g, ' ')
     // Strip accidental URL fragments copied from search snippets (e.g. com/courses/java-spring-boot-0-to-100/)
     .replace(/(?<![`@.:/a-zA-Z0-9_-])(?:com|org|net|edu|gov|io|ai|app|dev|co\.[a-z]{2})\/(?:[a-zA-Z0-9_.~%!$&'*+;=:@/-]*[a-zA-Z0-9_/])?/gi, ' ')
@@ -649,6 +656,10 @@ export function cleanAnswerNoise(text: string): string {
     .replace(/(?:^|\s*)(?:(?:accept(?:\s+all)?\s+cookies|cookie\s+policy|cookies\s+notice)\b[^.\n\r]*[.:;]?\s*)/gi, ' ')
     .replace(/(?:^|[\s.;•·|])(?:home|index)\s*(?:[>»/|]|&gt;)\s*[A-Za-z0-9\s_-]+(?:\s*(?:[>»/|]|&gt;)\s*[A-Za-z0-9\s_-]+)*[.:;]?\s*/gi, ' ')
     .replace(/(?:all\s+rights\s+reserved|copyright\s+©?\s*\d{4})\b[^.\n\r]*[.]?/gi, '')
+    // Strip raw prompt markers leaking from LLM
+    .replace(/\[\/?INST\]/g, '')
+    .replace(/<<\/?SYS>>/g, '')
+    .replace(/^(?:System|Assistant|Human|User):\s*/gmi, '')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\s+([.,;:!?])/g, '$1')
     .trim()
@@ -1339,14 +1350,59 @@ export function isEvidenceRelevant(query: string, sources: AnswerSource[]): bool
 }
 
 /**
+ * Strips trailing redundant References or Sources sections emitted by LLMs
+ * (e.g. "### References\n[1] ...\n[2] ..." or "**Sources:**\n1. ...")
+ * so the interactive Sources Cited UI is not duplicated by raw text.
+ */
+export function stripTrailingReferenceSections(text: string): string {
+  if (!text) return ''
+
+  // Isolate code blocks
+  const codeBlocks: string[] = []
+  const masked = text.replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
+    codeBlocks.push(match)
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`
+  })
+
+  // Match trailing References / Sources / Citations heading
+  const refHeaderRegex = /(?:^|\r?\n)(?:#{1,6}\s*(?:References?|Sources?|Citations?|Works\s+Cited|Bibliography)\b[^\r\n]*|\*\*(?:References?|Sources?|Citations?|Works\s+Cited|Bibliography):?\*\*[^\r\n]*|(?:References?|Sources?|Citations?|Works\s+Cited|Bibliography):\s*)([\s\S]*)$/i
+
+  const match = masked.match(refHeaderRegex)
+  if (match) {
+    const trailingBody = match[1].trim()
+    const trailingLines = trailingBody.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    const isAllRefLines = trailingLines.length === 0 || trailingLines.every((line) => {
+      return (
+        /^\[\d+\]/.test(line) ||
+        /^\d+\.\s+/.test(line) ||
+        /^[-*•]\s+/.test(line) ||
+        /https?:\/\//i.test(line) ||
+        /^\[[^\]]+\]\(/i.test(line)
+      )
+    })
+
+    if (isAllRefLines) {
+      const cutIndex = match.index!
+      const beforeRef = masked.slice(0, cutIndex).trim()
+      return beforeRef.replace(/__CODE_BLOCK_(\d+)__/g, (_m, idx) => codeBlocks[Number(idx)] || '')
+    }
+  }
+
+  return text
+}
+
+/**
  * Cleans conversational sign-offs, orphaned trailing headings, and incomplete trailing fragments.
  */
 export function cleanTrailingContent(text: string): string {
   if (!text) return ''
 
+  // 0. Strip trailing redundant reference sections
+  let preCleaned = stripTrailingReferenceSections(text)
+
   // Isolate code blocks during trailing cleanup
   const codeBlocks: string[] = []
-  let cleaned = text.trim().replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
+  let cleaned = preCleaned.trim().replace(/```[a-zA-Z0-9_#+-]*[ \t]*\r?\n[\s\S]*?```/g, (match) => {
     codeBlocks.push(match)
     return `__CODE_BLOCK_${codeBlocks.length - 1}__`
   })
@@ -1885,13 +1941,49 @@ export class AIAnswerService implements IAIAnswerService {
   ): AIAnswerData {
     const trimmed = (rawAnswer || '').trim()
 
-    // Clean tracking query params and noisy snippets from candidate sources
-    const sanitizedSources: AnswerSource[] = (sources || []).map((s) => ({
-      ...s,
-      url: cleanUrlTrackingParams(s.url),
-      destinationUrl: cleanUrlTrackingParams(s.destinationUrl || s.url),
-      snippet: cleanSourceSnippet(s.snippet || ''),
-    }))
+    // Clean tracking query params, fill missing titles/domains, and clean snippets
+    const rawSourcesList: AnswerSource[] = (sources || []).map((s) => {
+      const cleanUrl = cleanUrlTrackingParams(s.url)
+      const cleanDest = cleanUrlTrackingParams(s.destinationUrl || s.url)
+      let domain = (s.domain || '').trim()
+      if (!domain && cleanDest) {
+        try {
+          domain = new URL(cleanDest).hostname.replace(/^www\./, '')
+        } catch {
+          domain = ''
+        }
+      }
+      return {
+        ...s,
+        title: (s.title || domain || 'Source').trim(),
+        domain,
+        url: cleanUrl,
+        destinationUrl: cleanDest,
+        snippet: cleanSourceSnippet(s.snippet || ''),
+      }
+    })
+
+    // Deduplicate candidate sources by canonical URL while preserving order
+    const seenUrls = new Set<string>()
+    const sanitizedSources: AnswerSource[] = []
+    const oldToNewIndexMap = new Map<number, number>()
+
+    rawSourcesList.forEach((src, oldIdx) => {
+      const canonicalKey = (src.destinationUrl || src.url || '').toLowerCase()
+      if (!canonicalKey || !seenUrls.has(canonicalKey)) {
+        if (canonicalKey) seenUrls.add(canonicalKey)
+        const newIdx = sanitizedSources.length
+        sanitizedSources.push(src)
+        oldToNewIndexMap.set(oldIdx + 1, newIdx + 1)
+      } else {
+        const existingIdx = sanitizedSources.findIndex(
+          (s) => (s.destinationUrl || s.url || '').toLowerCase() === canonicalKey
+        )
+        if (existingIdx !== -1) {
+          oldToNewIndexMap.set(oldIdx + 1, existingIdx + 1)
+        }
+      }
+    })
 
     // 1. Direct arithmetic resolution: for queries like "What is 2 + 2?", give direct concise answer "2 + 2 = 4." without unrelated citations
     const mathSolution = query ? solveSimpleArithmetic(query) : null
@@ -1983,6 +2075,19 @@ export class AIAnswerService implements IAIAnswerService {
 
     // Deduplicate repeated execution steps, bullets, or sentences
     cleanText = this.deduplicateContent(cleanText)
+
+    // Remap citations if duplicate sources were merged during deduplication
+    if (oldToNewIndexMap.size > 0) {
+      cleanText = cleanText.replace(/\[([\d\s,]+)\]/g, (_match, inner) => {
+        const parts = inner.split(',').map((p: string) => {
+          const num = parseInt(p.trim(), 10)
+          if (isNaN(num)) return p
+          const mapped = oldToNewIndexMap.get(num)
+          return mapped !== undefined ? mapped.toString() : p
+        })
+        return `[${parts.join(', ')}]`
+      })
+    }
 
     // Sanitize citation markers: ensure all bracketed numbers map strictly to valid sources [1..N]
     // Also strips internal metadata markers like [#operation], [#result], and normalizes [#1] -> [1]
